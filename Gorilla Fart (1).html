@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gorilla Fart</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#1b2a14;--fg:#eaffc8;--ac:#8bd22a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b2a14;--fg:#eaffc8;--ac:#8bd22a}}
+:root[data-theme="dark"]{--bg:#1b2a14;--fg:#eaffc8;--ac:#8bd22a}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;overflow:hidden}
+#ui{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;z-index:2}
+h1{font-size:clamp(34px,9vw,72px);margin:0 0 8px;color:var(--ac)}
+p{max-width:520px;line-height:1.5;margin:6px 0}
+button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:14px;background:var(--ac);color:#102000;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="ui">
+  <h1>💨 GORILLA FART</h1>
+  <p>Swing your arms and push off the ground, walls and trees to move. Press <b>A / B / X / Y</b> to rip a fart boost in the direction you're looking.</p>
+  <p>Don't get tagged by the red gorillas. Survive as long as you can!</p>
+  <button id="enter">Enter VR</button>
+  <p id="msg" style="opacity:.8"></p>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.xr.enabled=true;
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x9bd36a);
+scene.fog=new THREE.Fog(0x9bd36a,15,60);
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.05,100);
+camera.position.y=1.6;
+const DROP=0.65; // virtual floor is raised: you sit lower to the ground
+const rig=new THREE.Group();scene.add(rig);
+const body=new THREE.Group();body.position.y=-DROP;rig.add(body);body.add(camera);
+scene.add(new THREE.HemisphereLight(0xffffff,0x446622,1.1));
+const sun=new THREE.DirectionalLight(0xffffee,0.6);sun.position.set(5,10,3);scene.add(sun);
+
+// world
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(64,64),new THREE.MeshLambertMaterial({color:0x4a7a2a}));
+ground.rotation.x=-Math.PI/2;scene.add(ground);
+const boxes=[];
+let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+function addBox(x,z,w,h,d,color){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color}));
+  m.position.set(x,h/2,z);scene.add(m);
+  boxes.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2,top:h});
+}
+for(let i=0;i<14;i++){
+  const a=rnd()*6.28,r=5+rnd()*22;
+  addBox(Math.cos(a)*r,Math.sin(a)*r,1+rnd()*2.5,1+rnd()*3.5,1+rnd()*2.5,0x8a8a7a);
+}
+for(let i=0;i<16;i++){
+  const a=rnd()*6.28,r=4+rnd()*25,x=Math.cos(a)*r,z=Math.sin(a)*r;
+  addBox(x,z,0.7,3.5,0.7,0x6b4423);
+  const top=new THREE.Mesh(new THREE.SphereGeometry(1.6,10,8),new THREE.MeshLambertMaterial({color:0x2f8a2f}));
+  top.position.set(x,4.2,z);scene.add(top);
+}
+
+// bots
+const bots=[];
+function makeGorilla(){
+  const g=new THREE.Group();
+  const mat=new THREE.MeshLambertMaterial({color:0xcc2222});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.9,0.5),mat);body.position.y=0.6;g.add(body);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.35,0.4),mat);head.position.y=1.25;g.add(head);
+  for(const s of[-1,1]){const arm=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.9,0.2),mat);arm.position.set(s*0.55,0.45,0.1);g.add(arm);}
+  scene.add(g);return g;
+}
+function resetBots(){bots.forEach((b,i)=>{const a=i*2.1+rnd()*2;b.mesh.position.set(Math.cos(a)*18,0,Math.sin(a)*18);});}
+for(let i=0;i<3;i++)bots.push({mesh:makeGorilla()});
+resetBots();
+
+// hands
+const hands=[];
+for(let i=0;i<2;i++){
+  const c=renderer.xr.getController(i);
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(0.08,12,10),new THREE.MeshLambertMaterial({color:i?0x333333:0x555555}));
+  body.add(mesh);body.add(c);
+  const h={c,mesh,last:null,touch:false};
+  c.addEventListener('connected',e=>{h.gp=e.data.gamepad;h.side=e.data.handedness;if(h.side==='left')c.add(hud);});
+  hands.push(h);
+}
+
+// HUD on left wrist
+const hc=document.createElement('canvas');hc.width=256;hc.height=128;
+const htex=new THREE.CanvasTexture(hc);
+const hud=new THREE.Mesh(new THREE.PlaneGeometry(0.16,0.08),new THREE.MeshBasicMaterial({map:htex,transparent:true}));
+hud.position.set(0,0.07,0.05);hud.rotation.x=-1.1;
+function drawHud(){
+  const x=hc.getContext('2d');
+  x.fillStyle='rgba(10,25,5,.85)';x.fillRect(0,0,256,128);
+  x.fillStyle='#bff25a';x.font='bold 26px sans-serif';
+  x.fillText('Time '+time.toFixed(1)+'s',14,36);
+  x.fillText('Best '+best.toFixed(1)+'s',14,72);
+  x.fillStyle='#333';x.fillRect(14,92,228,18);
+  x.fillStyle=cool>0?'#e8a020':'#8bd22a';x.fillRect(14,92,228*(1-Math.max(cool,0)/COOL),18);
+  htex.needsUpdate=true;
+}
+
+// audio
+let ac=null;
+function fartSound(){
+  if(!ac)return;const t=ac.currentTime;
+  const o=ac.createOscillator(),g=ac.createGain(),l=ac.createOscillator(),lg=ac.createGain();
+  o.type='sawtooth';
+  o.frequency.setValueAtTime(120+Math.random()*50,t);
+  o.frequency.exponentialRampToValueAtTime(40,t+0.5);
+  l.frequency.value=40+Math.random()*20;lg.gain.value=30;
+  l.connect(lg);lg.connect(o.frequency);
+  g.gain.setValueAtTime(0.5,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.55);
+  o.connect(g);g.connect(ac.destination);
+  o.start(t);l.start(t);o.stop(t+0.6);l.stop(t+0.6);
+}
+
+// puffs
+const puffs=[];
+const puffGeo=new THREE.SphereGeometry(0.2,8,6);
+function spawnPuffs(pos,dir){
+  for(let i=0;i<8;i++){
+    const m=new THREE.Mesh(puffGeo,new THREE.MeshBasicMaterial({color:0x9acd32,transparent:true,opacity:0.7}));
+    m.position.copy(pos).addScaledVector(dir,-0.1*i).add(new THREE.Vector3((rnd()-.5)*.3,(rnd()-.5)*.3,(rnd()-.5)*.3));
+    scene.add(m);puffs.push({m,life:1});
+  }
+}
+
+// state
+const vel=new THREE.Vector3();
+const REACH=1,COOL=0.7;let cool=0,boostT=0,time=0,best=0,hudT=0,prevBtn=false;
+const tmp=new THREE.Vector3(),head=new THREE.Vector3(),fwd=new THREE.Vector3();
+
+function fart(){
+  if(cool>0)return;
+  camera.getWorldPosition(head);camera.getWorldDirection(fwd);
+  tmp.copy(fwd);tmp.y+=0.35;tmp.normalize();
+  vel.addScaledVector(tmp,7);
+  if(vel.length()>13)vel.setLength(13);
+  boostT=0.25;cool=COOL;
+  spawnPuffs(head.clone().add(new THREE.Vector3(0,-0.5,0)).addScaledVector(fwd,-0.2),fwd);
+  fartSound();
+  hands.forEach(h=>{const a=h.gp&&h.gp.hapticActuators&&h.gp.hapticActuators[0];if(a&&a.pulse)a.pulse(0.8,120);});
+}
+addEventListener('keydown',e=>{if(e.code==='Space'){ac=ac||new (window.AudioContext||window.webkitAudioContext)();fart();}});
+
+function inBox(p,b,r){return p.x>b.minX-r&&p.x<b.maxX+r&&p.z>b.minZ-r&&p.z<b.maxZ+r&&p.y>-r&&p.y<b.top+r;}
+
+function tagged(){
+  best=Math.max(best,time);time=0;vel.set(0,0,0);
+  rig.position.set(0,0,0);resetBots();
+}
+
+const clock=new THREE.Clock();
+renderer.setAnimationLoop(()=>{
+  const dt=Math.min(clock.getDelta(),0.05);
+  time+=dt;cool-=dt;boostT-=dt;
+
+  // face buttons
+  let pressed=false;
+  for(const h of hands){if(h.gp&&h.gp.buttons&&((h.gp.buttons[4]&&h.gp.buttons[4].pressed)||(h.gp.buttons[5]&&h.gp.buttons[5].pressed)))pressed=true;}
+  if(pressed&&!prevBtn)fart();
+  prevBtn=pressed;
+
+  // hand locomotion
+  const move=new THREE.Vector3();let n=0;
+  for(const h of hands){
+    // extended "gorilla arms": hand reach is scaled out from the head
+    const lp=camera.position.clone().add(h.c.position.clone().sub(camera.position).multiplyScalar(REACH));
+    h.mesh.position.copy(lp);
+    tmp.copy(lp).add(rig.position);tmp.y-=DROP;
+    let touch=tmp.y<0.07;
+    if(!touch)for(const b of boxes){if(inBox(tmp,b,0.07)){touch=true;break;}}
+    if(touch&&h.last){
+      const d=lp.clone().sub(h.last);
+      if(d.length()<0.6){move.sub(d);n++;}
+    }
+    h.touch=touch;h.last=lp.clone();
+  }
+  if(n>0){
+    move.divideScalar(n);
+    rig.position.add(move);
+    if(boostT<=0){
+      const v=move.clone().divideScalar(Math.max(dt,0.001));
+      if(v.length()>10)v.setLength(10);
+      vel.lerp(v,0.7);
+    }
+  }else{
+    vel.y-=9.8*dt;
+    rig.position.addScaledVector(vel,dt);
+    vel.multiplyScalar(1-0.25*dt);
+  }
+
+  // floor / platform / bounds
+  for(const b of boxes){
+    const p=rig.position;
+    if(p.x>b.minX&&p.x<b.maxX&&p.z>b.minZ&&p.z<b.maxZ&&p.y<b.top&&p.y>b.top-0.6&&vel.y<=0){p.y=b.top;vel.y=0;}
+  }
+  if(rig.position.y<0){rig.position.y=0;if(vel.y<0)vel.y=0;vel.x*=0.9;vel.z*=0.9;}
+  if(Math.abs(rig.position.x)>30){rig.position.x=Math.sign(rig.position.x)*30;vel.x=0;}
+  if(Math.abs(rig.position.z)>30){rig.position.z=Math.sign(rig.position.z)*30;vel.z=0;}
+
+  // bots
+  camera.getWorldPosition(head);
+  const speed=3+Math.min(time*0.05,2.5);
+  for(const b of bots){
+    const m=b.mesh.position;
+    tmp.set(head.x-m.x,0,head.z-m.z);
+    const d=tmp.length();
+    if(d>0.01){tmp.normalize();m.addScaledVector(tmp,speed*dt);b.mesh.rotation.y=Math.atan2(tmp.x,tmp.z);}
+    b.mesh.position.y=Math.abs(Math.sin(time*8))*0.1;
+    if(d<0.8&&head.y<m.y+1.7&&head.y>m.y-0.4){tagged();break;}
+  }
+
+  // puffs
+  for(let i=puffs.length-1;i>=0;i--){
+    const p=puffs[i];p.life-=dt;
+    p.m.scale.multiplyScalar(1+dt*1.5);p.m.material.opacity=Math.max(p.life,0)*0.7;
+    if(p.life<=0){scene.remove(p.m);p.m.material.dispose();puffs.splice(i,1);}
+  }
+
+  hudT-=dt;if(hudT<=0){drawHud();hudT=0.2;}
+  renderer.render(scene,camera);
+});
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+
+// enter VR
+const ui=document.getElementById('ui'),btn=document.getElementById('enter'),msg=document.getElementById('msg');
+btn.onclick=async()=>{
+  ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();
+  if(!navigator.xr){msg.textContent='WebXR not available. Open this link in the Meta Quest Browser.';return;}
+  try{
+    const ok=await navigator.xr.isSessionSupported('immersive-vr');
+    if(!ok){msg.textContent='Immersive VR not supported here. Use the Quest Browser (Space bar farts on desktop).';ui.style.display='none';return;}
+    const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
+    s.addEventListener('end',()=>{ui.style.display='flex';});
+    await renderer.xr.setSession(s);
+    ui.style.display='none';
+  }catch(e){msg.textContent='Could not start VR: '+e.message;}
+};
+</script>
+</body>
+</html>
