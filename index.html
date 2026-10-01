@@ -103,6 +103,16 @@ function drawHud(){
   htex.needsUpdate=true;
 }
 
+// haptics
+function buzz(h,i,ms){
+  const g=h.gp;if(!g)return;
+  try{
+    const a=g.hapticActuators&&g.hapticActuators[0];
+    if(a&&a.pulse)a.pulse(i,ms);
+    else if(g.vibrationActuator)g.vibrationActuator.playEffect('dual-rumble',{duration:ms,strongMagnitude:i,weakMagnitude:i});
+  }catch(e){}
+}
+
 // audio
 let ac=null;
 function fartSound(){
@@ -143,7 +153,7 @@ function fart(){
   boostT=0.25;cool=COOL;
   spawnPuffs(head.clone().add(new THREE.Vector3(0,-0.5,0)).addScaledVector(fwd,-0.2),fwd);
   fartSound();
-  hands.forEach(h=>{const a=h.gp&&h.gp.hapticActuators&&h.gp.hapticActuators[0];if(a&&a.pulse)a.pulse(0.8,120);});
+  hands.forEach(h=>buzz(h,0.8,120));
 }
 addEventListener('keydown',e=>{if(e.code==='Space'){ac=ac||new (window.AudioContext||window.webkitAudioContext)();fart();}});
 
@@ -177,6 +187,10 @@ renderer.setAnimationLoop(()=>{
     if(touch&&h.last){
       const d=lp.clone().sub(h.last);
       if(d.length()<0.6){move.sub(d);n++;}
+    }
+    if(touch&&!h.touch){
+      const sp=h.last?lp.distanceTo(h.last)/Math.max(dt,0.001):0;
+      buzz(h,Math.min(0.25+sp*0.2,1),50);
     }
     h.touch=touch;h.last=lp.clone();
   }
