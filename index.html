@@ -9,7 +9,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b2a14;--fg:#eaffc8;--ac:#8bd22a}}
 :root[data-theme="dark"]{--bg:#1b2a14;--fg:#eaffc8;--ac:#8bd22a}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;overflow:hidden}
-#ui{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;z-index:2}
+#ui{background:var(--bg);overflow:auto;position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;z-index:2}
 h1{font-size:clamp(34px,9vw,72px);margin:0 0 8px;color:var(--ac)}
 p{max-width:520px;line-height:1.5;margin:6px 0}
 button.inf{background:#e24b4b;color:#fff}
@@ -22,7 +22,7 @@ button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:1
   <h1>💨 GORILLA FART</h1>
   <p>Swing your arms and push off the ground, walls and trees to move. Press <b>A / B / X / Y</b> to rip a fart boost in the direction you're looking.</p>
   <p><b>Casual:</b> chill out with colorful gorillas that just wander around.<br><b>Infection:</b> red gorillas hunt you down. Survive as long as you can!</p>
-  <p>Find the dark hole in the ground and drop in to explore the caves. Walk into the glowing portal to climb back out.</p>
+  <p>Climb the staircase up the giant tree, check out the computer, then drop into the hole to explore the caves. Walk into the glowing portal to climb back out. The caves have gorillas too, so watch out!</p>
   <div class="row"><button id="casual">Casual</button><button id="infection" class="inf">Infection</button></div>
   <p id="msg" style="opacity:.8"></p>
 </div>
@@ -48,7 +48,11 @@ const sun=new THREE.DirectionalLight(0xffffee,0.6);sun.position.set(5,10,3);scen
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(64,64),new THREE.MeshLambertMaterial({color:0x4a7a2a}));
 ground.rotation.x=-Math.PI/2;scene.add(ground);
 const boxes=[];
-const HOLE={x:0,z:-8,r:1.6},CY=-40,PORTAL={x:22,z:-20};
+const TH=7; // treehouse deck height
+const HOLE={x:3,z:-6.5,hs:1.2,y:TH},CY=-40,PORTAL={x:22,z:-20},SPAWN={x:-2.5,y:TH,z:-4.5};
+const nearHub=(x,z)=>(Math.abs(x)<11&&z>-19&&z<3)||(Math.abs(x)<7&&z>=3&&z<22);
+// MAPS: every map needs an entry here so it always has gorillas (counts per mode)
+const MAPS={forest:{floor:0,casual:6,infection:3},cave:{floor:CY,casual:5,infection:3}};
 let inCave=false,floorY=0;
 let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
 function addBox(x,z,w,h,d,color,y0=0){
@@ -100,22 +104,54 @@ function addTree(x,z){
 for(let i=0;i<18;i++){
   const a=rnd()*6.28,r=4+rnd()*25;
   const tx=Math.cos(a)*r,tz=Math.sin(a)*r;
-  if(Math.hypot(tx-HOLE.x,tz-HOLE.z)>4.5)addTree(tx,tz);
+  if(!nearHub(tx,tz))addTree(tx,tz);
 }
 for(let i=0;i<12;i++){
   const a=rnd()*6.28,r=4+rnd()*24,x=Math.cos(a)*r,z=Math.sin(a)*r,sz=0.7+rnd()*1.1;
-  if(Math.hypot(x-HOLE.x,z-HOLE.z)<4)continue;
+  if(nearHub(x,z))continue;
   const m=new THREE.Mesh(new THREE.IcosahedronGeometry(sz,0),new THREE.MeshLambertMaterial({color:0x7d7d78,flatShading:true}));
   m.scale.y=0.8;m.position.set(x,sz*0.8,z);m.rotation.y=rnd()*3;scene.add(m);
   boxes.push({minX:x-sz*0.85,maxX:x+sz*0.85,minZ:z-sz*0.85,maxZ:z+sz*0.85,minY:0,top:sz*1.4});
 }
 
-// hole + caves map
+// treehouse hub: tall tree, deck with a hole, computer, and a staircase
 {
-  const d=new THREE.Mesh(new THREE.CircleGeometry(HOLE.r,32),new THREE.MeshBasicMaterial({color:0x020202}));
-  d.rotation.x=-Math.PI/2;d.position.set(HOLE.x,0.02,HOLE.z);scene.add(d);
-  const rim=new THREE.Mesh(new THREE.RingGeometry(HOLE.r,HOLE.r+0.4,32),lm(0x5a4a3a));
-  rim.rotation.x=-Math.PI/2;rim.position.set(HOLE.x,0.03,HOLE.z);scene.add(rim);
+  const bark=0x6b4a2a,H=TH,wood=0x9a7a52;
+  addBox(0,-8,2.4,H+6,2.4,bark);                         // big trunk
+  const y0=H-0.5;
+  addBox(0,-10.85,12,0.5,6.3,wood,y0);                   // deck strips around the hole
+  addBox(0,-3.65,12,0.5,3.3,wood,y0);
+  addBox(-2.1,-6.5,7.8,0.5,2.4,wood,y0);
+  addBox(5.1,-6.5,1.8,0.5,2.4,wood,y0);
+  const pit=new THREE.Mesh(new THREE.PlaneGeometry(2.4,2.4),new THREE.MeshBasicMaterial({color:0x020202}));
+  pit.rotation.x=-Math.PI/2;pit.position.set(HOLE.x,H-0.9,HOLE.z);scene.add(pit);
+  // railings
+  addBox(0,-13.85,12,0.9,0.3,0x5e4124,H);
+  addBox(-5.85,-8,0.3,0.9,12,0x5e4124,H);
+  addBox(5.85,-8,0.3,0.9,12,0x5e4124,H);
+  addBox(-3.75,-2.15,4.5,0.9,0.3,0x5e4124,H);
+  addBox(3.75,-2.15,4.5,0.9,0.3,0x5e4124,H);
+  // staircase down the south side
+  for(let i=0;i<14;i++){
+    addBox(0,-1.35+(13-i)*1.3,3,(i+1)*0.5,1.3,i%2?0xa88a5a:0x937547);
+  }
+  // computer
+  const cz=-12.5,cxp=-2.5;
+  addBox(cxp,cz,1.1,0.9,0.5,0x3a3a40,H);
+  addBox(cxp,cz-0.15,1.0,0.65,0.1,0x1a1a1f,H+0.9);
+  const cv=document.createElement('canvas');cv.width=256;cv.height=160;
+  const cx=cv.getContext('2d');
+  cx.fillStyle='#06240f';cx.fillRect(0,0,256,160);
+  cx.fillStyle='#7dff7d';cx.font='bold 24px monospace';
+  cx.fillText('GORILLA',20,60);cx.fillText('COMPUTER',20,92);
+  cx.font='18px monospace';cx.fillText('coming soon...',20,128);
+  const scr=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.56),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv)}));
+  scr.position.set(cxp,H+1.225,cz-0.09);scene.add(scr);
+  // canopy high above the deck
+  for(let k=0;k<7;k++){
+    const m=new THREE.Mesh(new THREE.SphereGeometry(3+Math.random()*2,10,8),lm(k%2?0x2f8a2f:0x3c9a3a));
+    m.position.set((Math.random()-.5)*8,H+7+Math.random()*2,-8+(Math.random()-.5)*8);scene.add(m);
+  }
 }
 function addCone(x,z,rad,h,y0,flip,color){
   const m=new THREE.Mesh(new THREE.ConeGeometry(rad,h,6),lm(color));
@@ -159,8 +195,8 @@ function tp(into){
   camera.getWorldPosition(head);
   const ox=head.x-rig.position.x,oz=head.z-rig.position.z;
   inCave=into;floorY=into?CY:0;
-  const tx=into?0:HOLE.x+3.5,tz=into?0:HOLE.z;
-  rig.position.set(tx-ox,floorY+(into?0.3:0),tz-oz);vel.set(0,0,0);
+  const tx=into?0:SPAWN.x,tz=into?0:SPAWN.z;
+  rig.position.set(tx-ox,into?floorY+0.3:SPAWN.y,tz-oz);vel.set(0,0,0);
   hands.forEach(h=>{h.last=null;});
   scene.background.set(into?0x07070d:0x9bd36a);
   scene.fog.color.set(into?0x07070d:0x9bd36a);
@@ -183,9 +219,12 @@ let mode='casual';
 function setMode(m){
   mode=m;bots.forEach(b=>scene.remove(b.mesh));bots.length=0;
   const cols=[0x3b82f6,0xf5c518,0xa855f7,0x22c55e,0xff8c1a,0x14b8a6];
-  const n=m==='infection'?3:6;
-  for(let i=0;i<n;i++)bots.push({mesh:makeGorilla(m==='infection'?0xcc2222:cols[i]),tx:0,tz:0,wt:0});
-  resetBots();time=0;vel.set(0,0,0);rig.position.set(0,0,0);
+  let ci=0;
+  for(const k in MAPS){
+    const n=MAPS[k][m];
+    for(let i=0;i<n;i++)bots.push({map:k,mesh:makeGorilla(m==='infection'?0xcc2222:cols[ci++%6]),tx:0,tz:0,wt:0});
+  }
+  resetBots();time=0;vel.set(0,0,0);rig.position.set(SPAWN.x,SPAWN.y,SPAWN.z);
 }
 
 // hands
@@ -272,8 +311,9 @@ addEventListener('keydown',e=>{if(e.code==='Space'){ac=ac||new (window.AudioCont
 function inBox(p,b,r){return p.x>b.minX-r&&p.x<b.maxX+r&&p.z>b.minZ-r&&p.z<b.maxZ+r&&p.y>b.minY-r&&p.y<b.top+r;}
 
 function tagged(){
+  if(inCave)tp(false);
   best=Math.max(best,time);time=0;vel.set(0,0,0);
-  rig.position.set(0,0,0);resetBots();
+  rig.position.set(SPAWN.x,SPAWN.y,SPAWN.z);resetBots();
 }
 
 const clock=new THREE.Clock();
@@ -294,7 +334,7 @@ renderer.setAnimationLoop(()=>{
     const lp=camera.position.clone().add(h.c.position.clone().sub(camera.position).multiplyScalar(REACH));
     h.mesh.position.copy(lp);
     tmp.copy(lp).add(rig.position);tmp.y-=DROP;
-    let touch=tmp.y<floorY+0.07&&!(!inCave&&Math.hypot(tmp.x-HOLE.x,tmp.z-HOLE.z)<HOLE.r);
+    let touch=tmp.y<floorY+0.07;
     if(!touch)for(const b of boxes){if(inBox(tmp,b,0.07)){touch=true;break;}}
     if(touch&&h.last){
       const d=lp.clone().sub(h.last);
@@ -326,8 +366,20 @@ renderer.setAnimationLoop(()=>{
     if(p.x>b.minX&&p.x<b.maxX&&p.z>b.minZ&&p.z<b.maxZ&&p.y<b.top&&p.y>b.top-0.6&&vel.y<=0){p.y=b.top;vel.y=0;}
   }
   camera.getWorldPosition(head);
-  if(!inCave&&Math.hypot(head.x-HOLE.x,head.z-HOLE.z)<HOLE.r*0.85){
-    if(rig.position.y<-1.5)tp(true);
+  // body collision: push your head out of walls, trunks and railings
+  for(const b of boxes){
+    const m=0.25;
+    if(head.x>b.minX-m&&head.x<b.maxX+m&&head.z>b.minZ-m&&head.z<b.maxZ+m&&head.y>b.minY-0.1&&head.y<b.top+0.1&&rig.position.y<b.top-0.6){
+      const o=[head.x-(b.minX-m),(b.maxX+m)-head.x,head.z-(b.minZ-m),(b.maxZ+m)-head.z];
+      const k=o.indexOf(Math.min(...o)),amt=o[k];
+      if(k===0){rig.position.x-=amt;head.x-=amt;vel.x=Math.min(vel.x,0);}
+      else if(k===1){rig.position.x+=amt;head.x+=amt;vel.x=Math.max(vel.x,0);}
+      else if(k===2){rig.position.z-=amt;head.z-=amt;vel.z=Math.min(vel.z,0);}
+      else{rig.position.z+=amt;head.z+=amt;vel.z=Math.max(vel.z,0);}
+    }
+  }
+  if(!inCave&&Math.abs(head.x-HOLE.x)<HOLE.hs*0.85&&Math.abs(head.z-HOLE.z)<HOLE.hs*0.85&&rig.position.y>HOLE.y-4){
+    if(rig.position.y<HOLE.y-1.5)tp(true);
   }else if(rig.position.y<floorY){rig.position.y=floorY;if(vel.y<0)vel.y=0;vel.x*=0.9;vel.z*=0.9;}
   if(inCave&&Math.hypot(head.x-PORTAL.x,head.z-PORTAL.z)<1.3)tp(false);
   if(Math.abs(rig.position.x)>30){rig.position.x=Math.sign(rig.position.x)*30;vel.x=0;}
@@ -337,8 +389,8 @@ renderer.setAnimationLoop(()=>{
   camera.getWorldPosition(head);
   const speed=3+Math.min(time*0.05,2.5);
   for(const b of bots){
-    if(inCave){b.mesh.visible=false;continue;}
-    b.mesh.visible=true;
+    b.mesh.visible=(b.map==='cave')===inCave;
+    if(!b.mesh.visible)continue;
     const m=b.mesh.position;
     tmp.set(head.x-m.x,0,head.z-m.z);
     let d=tmp.length(),sp=speed;
@@ -348,7 +400,7 @@ renderer.setAnimationLoop(()=>{
       tmp.set(b.tx-m.x,0,b.tz-m.z);d=tmp.length();sp=1.5;
     }
     if(d>0.01){tmp.normalize();m.addScaledVector(tmp,sp*dt);b.mesh.rotation.y=Math.atan2(tmp.x,tmp.z);}
-    b.mesh.position.y=Math.abs(Math.sin(time*8))*0.1;
+    b.mesh.position.y=MAPS[b.map].floor+Math.abs(Math.sin(time*8))*0.1;
     if(mode==='infection'&&d<0.8&&head.y<m.y+1.7&&head.y>m.y-0.4){tagged();break;}
   }
 
