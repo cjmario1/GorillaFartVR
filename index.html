@@ -12,6 +12,8 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:
 #ui{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;z-index:2}
 h1{font-size:clamp(34px,9vw,72px);margin:0 0 8px;color:var(--ac)}
 p{max-width:520px;line-height:1.5;margin:6px 0}
+button.inf{background:#e24b4b;color:#fff}
+.row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
 button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:14px;background:var(--ac);color:#102000;font-weight:700;cursor:pointer}
 </style>
 </head>
@@ -19,8 +21,8 @@ button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:1
 <div id="ui">
   <h1>💨 GORILLA FART</h1>
   <p>Swing your arms and push off the ground, walls and trees to move. Press <b>A / B / X / Y</b> to rip a fart boost in the direction you're looking.</p>
-  <p>Don't get tagged by the red gorillas. Survive as long as you can!</p>
-  <button id="enter">Enter VR</button>
+  <p><b>Casual:</b> chill out with colorful gorillas that just wander around.<br><b>Infection:</b> red gorillas hunt you down. Survive as long as you can!</p>
+  <div class="row"><button id="casual">Casual</button><button id="infection" class="inf">Infection</button></div>
   <p id="msg" style="opacity:.8"></p>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -46,35 +48,82 @@ const ground=new THREE.Mesh(new THREE.PlaneGeometry(64,64),new THREE.MeshLambert
 ground.rotation.x=-Math.PI/2;scene.add(ground);
 const boxes=[];
 let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
-function addBox(x,z,w,h,d,color){
+function addBox(x,z,w,h,d,color,y0=0){
   const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color}));
-  m.position.set(x,h/2,z);scene.add(m);
-  boxes.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2,top:h});
+  m.position.set(x,y0+h/2,z);scene.add(m);
+  boxes.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2,minY:y0,top:y0+h});
 }
 for(let i=0;i<14;i++){
   const a=rnd()*6.28,r=5+rnd()*22;
   addBox(Math.cos(a)*r,Math.sin(a)*r,1+rnd()*2.5,1+rnd()*3.5,1+rnd()*2.5,0x8a8a7a);
 }
-for(let i=0;i<16;i++){
-  const a=rnd()*6.28,r=4+rnd()*25,x=Math.cos(a)*r,z=Math.sin(a)*r;
-  addBox(x,z,0.7,3.5,0.7,0x6b4423);
-  const top=new THREE.Mesh(new THREE.SphereGeometry(1.6,10,8),new THREE.MeshLambertMaterial({color:0x2f8a2f}));
-  top.position.set(x,4.2,z);scene.add(top);
+const greens=[0x2f8a2f,0x3c9a3a,0x1f6f3a,0x5aa02c,0x7a9a2a,0x2a7a5a,0x4a8f1f];
+const barks=[0x6b4423,0x5a3a20,0x7a5a3a,0x4a3828,0x8a6a48,0x9a8a7a];
+const lm=c=>new THREE.MeshLambertMaterial({color:c});
+const pick=arr=>arr[Math.floor(rnd()*arr.length)];
+function addTree(x,z){
+  const type=Math.floor(rnd()*4); // 0 leafy, 1 pine, 2 bare, 3 tall
+  const th=3.2+rnd()*3.3, tw=0.45+rnd()*0.6, bark=pick(barks), leaf=pick(greens);
+  addBox(x,z,tw,th,tw,bark);
+  const nb=type===2?4+Math.floor(rnd()*3):2+Math.floor(rnd()*3);
+  for(let k=0;k<nb;k++){
+    const ax=rnd()<.5,sg=rnd()<.5?1:-1,len=1.2+rnd()*1.9,t=0.18+rnd()*0.14;
+    const y0=1.1+rnd()*(th-2.2),off=tw/2+len/2-0.1;
+    addBox(x+(ax?sg*off:0),z+(ax?0:sg*off),ax?len:t,t,ax?t:len,bark,y0);
+    if((type===0||type===3)&&rnd()<0.6){
+      const b=new THREE.Mesh(new THREE.SphereGeometry(0.35+rnd()*0.35,8,6),lm(leaf));
+      b.position.set(x+(ax?sg*(off+len/2):0),y0+0.3,z+(ax?0:sg*(off+len/2)));scene.add(b);
+    }
+  }
+  if(type===0){
+    const n=2+Math.floor(rnd()*3);
+    for(let k=0;k<n;k++){
+      const m=new THREE.Mesh(new THREE.SphereGeometry(1+rnd()*0.9,10,8),lm(rnd()<.3?pick(greens):leaf));
+      m.scale.set(1,0.7+rnd()*0.5,1);
+      m.position.set(x+(rnd()-.5)*1.6,th+0.2+rnd()*0.9,z+(rnd()-.5)*1.6);scene.add(m);
+    }
+  }else if(type===1){
+    const layers=3+Math.floor(rnd()*3);let y=th*0.45,rad=1.6+rnd()*0.8;
+    const ph=(th*0.75)/layers+0.6;
+    for(let k=0;k<layers;k++){
+      const c=new THREE.Mesh(new THREE.ConeGeometry(rad,ph,8),lm(leaf));
+      c.position.set(x,y+ph/2,z);scene.add(c);y+=ph*0.65;rad*=0.72;
+    }
+  }else if(type===3){
+    const m=new THREE.Mesh(new THREE.SphereGeometry(0.9+rnd()*0.5,10,8),lm(leaf));
+    m.scale.set(1,1.5+rnd()*0.8,1);m.position.set(x,th+0.8,z);scene.add(m);
+  }
+}
+for(let i=0;i<18;i++){
+  const a=rnd()*6.28,r=4+rnd()*25;
+  addTree(Math.cos(a)*r,Math.sin(a)*r);
+}
+for(let i=0;i<12;i++){
+  const a=rnd()*6.28,r=4+rnd()*24,x=Math.cos(a)*r,z=Math.sin(a)*r,sz=0.7+rnd()*1.1;
+  const m=new THREE.Mesh(new THREE.IcosahedronGeometry(sz,0),new THREE.MeshLambertMaterial({color:0x7d7d78,flatShading:true}));
+  m.scale.y=0.8;m.position.set(x,sz*0.8,z);m.rotation.y=rnd()*3;scene.add(m);
+  boxes.push({minX:x-sz*0.85,maxX:x+sz*0.85,minZ:z-sz*0.85,maxZ:z+sz*0.85,minY:0,top:sz*1.4});
 }
 
 // bots
 const bots=[];
-function makeGorilla(){
+function makeGorilla(color){
   const g=new THREE.Group();
-  const mat=new THREE.MeshLambertMaterial({color:0xcc2222});
+  const mat=new THREE.MeshLambertMaterial({color});
   const body=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.9,0.5),mat);body.position.y=0.6;g.add(body);
   const head=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.35,0.4),mat);head.position.y=1.25;g.add(head);
   for(const s of[-1,1]){const arm=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.9,0.2),mat);arm.position.set(s*0.55,0.45,0.1);g.add(arm);}
   scene.add(g);return g;
 }
 function resetBots(){bots.forEach((b,i)=>{const a=i*2.1+rnd()*2;b.mesh.position.set(Math.cos(a)*18,0,Math.sin(a)*18);});}
-for(let i=0;i<3;i++)bots.push({mesh:makeGorilla()});
-resetBots();
+let mode='casual';
+function setMode(m){
+  mode=m;bots.forEach(b=>scene.remove(b.mesh));bots.length=0;
+  const cols=[0x3b82f6,0xf5c518,0xa855f7,0x22c55e,0xff8c1a,0x14b8a6];
+  const n=m==='infection'?3:6;
+  for(let i=0;i<n;i++)bots.push({mesh:makeGorilla(m==='infection'?0xcc2222:cols[i]),tx:0,tz:0,wt:0});
+  resetBots();time=0;vel.set(0,0,0);rig.position.set(0,0,0);
+}
 
 // hands
 const hands=[];
@@ -96,8 +145,8 @@ function drawHud(){
   const x=hc.getContext('2d');
   x.fillStyle='rgba(10,25,5,.85)';x.fillRect(0,0,256,128);
   x.fillStyle='#bff25a';x.font='bold 26px sans-serif';
-  x.fillText('Time '+time.toFixed(1)+'s',14,36);
-  x.fillText('Best '+best.toFixed(1)+'s',14,72);
+  if(mode==='casual'){x.fillText('Casual',14,36);x.fillText('No tags',14,72);}
+  else{x.fillText('Time '+time.toFixed(1)+'s',14,36);x.fillText('Best '+best.toFixed(1)+'s',14,72);}
   x.fillStyle='#333';x.fillRect(14,92,228,18);
   x.fillStyle=cool>0?'#e8a020':'#8bd22a';x.fillRect(14,92,228*(1-Math.max(cool,0)/COOL),18);
   htex.needsUpdate=true;
@@ -157,7 +206,7 @@ function fart(){
 }
 addEventListener('keydown',e=>{if(e.code==='Space'){ac=ac||new (window.AudioContext||window.webkitAudioContext)();fart();}});
 
-function inBox(p,b,r){return p.x>b.minX-r&&p.x<b.maxX+r&&p.z>b.minZ-r&&p.z<b.maxZ+r&&p.y>-r&&p.y<b.top+r;}
+function inBox(p,b,r){return p.x>b.minX-r&&p.x<b.maxX+r&&p.z>b.minZ-r&&p.z<b.maxZ+r&&p.y>b.minY-r&&p.y<b.top+r;}
 
 function tagged(){
   best=Math.max(best,time);time=0;vel.set(0,0,0);
@@ -223,10 +272,15 @@ renderer.setAnimationLoop(()=>{
   for(const b of bots){
     const m=b.mesh.position;
     tmp.set(head.x-m.x,0,head.z-m.z);
-    const d=tmp.length();
-    if(d>0.01){tmp.normalize();m.addScaledVector(tmp,speed*dt);b.mesh.rotation.y=Math.atan2(tmp.x,tmp.z);}
+    let d=tmp.length(),sp=speed;
+    if(mode==='casual'){
+      b.wt-=dt;
+      if(b.wt<=0){b.tx=(Math.random()-.5)*50;b.tz=(Math.random()-.5)*50;b.wt=4+Math.random()*5;}
+      tmp.set(b.tx-m.x,0,b.tz-m.z);d=tmp.length();sp=1.5;
+    }
+    if(d>0.01){tmp.normalize();m.addScaledVector(tmp,sp*dt);b.mesh.rotation.y=Math.atan2(tmp.x,tmp.z);}
     b.mesh.position.y=Math.abs(Math.sin(time*8))*0.1;
-    if(d<0.8&&head.y<m.y+1.7&&head.y>m.y-0.4){tagged();break;}
+    if(mode==='infection'&&d<0.8&&head.y<m.y+1.7&&head.y>m.y-0.4){tagged();break;}
   }
 
   // puffs
@@ -243,8 +297,8 @@ renderer.setAnimationLoop(()=>{
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 
 // enter VR
-const ui=document.getElementById('ui'),btn=document.getElementById('enter'),msg=document.getElementById('msg');
-btn.onclick=async()=>{
+const ui=document.getElementById('ui'),msg=document.getElementById('msg');
+async function start(m){setMode(m);
   ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();
   if(!navigator.xr){msg.textContent='WebXR not available. Open this link in the Meta Quest Browser.';return;}
   try{
@@ -255,7 +309,9 @@ btn.onclick=async()=>{
     await renderer.xr.setSession(s);
     ui.style.display='none';
   }catch(e){msg.textContent='Could not start VR: '+e.message;}
-};
+}
+document.getElementById('casual').onclick=()=>start('casual');
+document.getElementById('infection').onclick=()=>start('infection');
 </script>
 </body>
 </html>
