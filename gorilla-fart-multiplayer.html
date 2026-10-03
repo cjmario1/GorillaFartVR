@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gorilla Fart</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#1b2a14;--fg:#eaffc8;--ac:#8bd22a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b2a14;--fg:#eaffc8;--ac:#8bd22a}}
+:root[data-theme="dark"]{--bg:#1b2a14;--fg:#eaffc8;--ac:#8bd22a}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;overflow:hidden}
+#ui{background:var(--bg);overflow:auto;position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;z-index:2}
+h1{font-size:clamp(34px,9vw,72px);margin:0 0 8px;color:var(--ac)}
+p{max-width:520px;line-height:1.5;margin:6px 0}
+input{font-size:20px;padding:12px;border-radius:12px;border:2px solid var(--ac);background:transparent;color:var(--fg);text-align:center;text-transform:uppercase;width:160px}
+button.sm{font-size:16px;padding:10px 16px;margin-top:0}
+button.inf{background:#e24b4b;color:#fff}
+.row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:14px;background:var(--ac);color:#102000;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="ui">
+  <h1>💨 GORILLA FART</h1>
+  <p>Swing your arms and push off the ground, walls and trees to move. Press <b>A / B / X / Y</b> to rip a fart boost in the direction you're looking.</p>
+  <p><b>Casual:</b> chill out with colorful gorillas that just wander around.<br><b>Infection:</b> red gorillas hunt you down. Survive as long as you can!</p>
+  <p>Climb the staircase up the giant tree, check out the computer, then drop into the hole to explore the caves. Walk into the glowing portal to climb back out. The caves have gorillas too, so watch out!</p>
+  <p>Friends: type the same <b>room code</b> to play together. Leave it blank to play solo.</p>
+  <div class="row" style="margin-top:6px"><input id="room" maxlength="4" placeholder="ROOM CODE"><button id="rand" class="sm">Random</button></div>
+  <div class="row"><button id="casual">Casual</button><button id="infection" class="inf">Infection</button></div>
+  <p id="msg" style="opacity:.8"></p>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.xr.enabled=true;
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x9bd36a);
+scene.fog=new THREE.Fog(0x9bd36a,15,60);
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.05,100);
+camera.position.y=1.6;
+const DROP=0.65; // virtual floor is raised: you sit lower to the ground
+const rig=new THREE.Group();scene.add(rig);
+const body=new THREE.Group();body.position.y=-DROP;rig.add(body);body.add(camera);
+const hemi=new THREE.HemisphereLight(0xffffff,0x446622,1.1);scene.add(hemi);
+const sun=new THREE.DirectionalLight(0xffffee,0.6);sun.position.set(5,10,3);scene.add(sun);
+
+// world
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(64,64),new THREE.MeshLambertMaterial({color:0x4a7a2a}));
+ground.rotation.x=-Math.PI/2;scene.add(ground);
+const boxes=[];
+const TH=7; // treehouse deck height
+const HOLE={x:3,z:-6.5,hs:1.2,y:TH},CY=-40,PORTAL={x:22,z:-20},SPAWN={x:-2.5,y:TH,z:-4.5};
+const nearHub=(x,z)=>(Math.abs(x)<11&&z>-19&&z<3)||(Math.abs(x)<7&&z>=3&&z<22);
+// MAPS: every map needs an entry here so it always has gorillas (counts per mode)
+const MAPS={forest:{floor:0,casual:6,infection:3},cave:{floor:CY,casual:5,infection:3}};
+let inCave=false,floorY=0;
+let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+function addBox(x,z,w,h,d,color,y0=0){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color}));
+  m.position.set(x,y0+h/2,z);scene.add(m);
+  boxes.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2,minY:y0,top:y0+h});
+}
+for(let i=0;i<14;i++){
+  const a=rnd()*6.28,r=5+rnd()*22;
+  addBox(Math.cos(a)*r,Math.sin(a)*r,1+rnd()*2.5,1+rnd()*3.5,1+rnd()*2.5,0x8a8a7a);
+}
+const greens=[0x2f8a2f,0x3c9a3a,0x1f6f3a,0x5aa02c,0x7a9a2a,0x2a7a5a,0x4a8f1f];
+const barks=[0x6b4423,0x5a3a20,0x7a5a3a,0x4a3828,0x8a6a48,0x9a8a7a];
+const lm=c=>new THREE.MeshLambertMaterial({color:c});
+const pick=arr=>arr[Math.floor(rnd()*arr.length)];
+function addTree(x,z){
+  const type=Math.floor(rnd()*4); // 0 leafy, 1 pine, 2 bare, 3 tall
+  const th=3.2+rnd()*3.3, tw=0.45+rnd()*0.6, bark=pick(barks), leaf=pick(greens);
+  addBox(x,z,tw,th,tw,bark);
+  const nb=type===2?4+Math.floor(rnd()*3):2+Math.floor(rnd()*3);
+  for(let k=0;k<nb;k++){
+    const ax=rnd()<.5,sg=rnd()<.5?1:-1,len=1.2+rnd()*1.9,t=0.18+rnd()*0.14;
+    const y0=1.1+rnd()*(th-2.2),off=tw/2+len/2-0.1;
+    addBox(x+(ax?sg*off:0),z+(ax?0:sg*off),ax?len:t,t,ax?t:len,bark,y0);
+    if((type===0||type===3)&&rnd()<0.6){
+      const b=new THREE.Mesh(new THREE.SphereGeometry(0.35+rnd()*0.35,8,6),lm(leaf));
+      b.position.set(x+(ax?sg*(off+len/2):0),y0+0.3,z+(ax?0:sg*(off+len/2)));scene.add(b);
+    }
+  }
+  if(type===0){
+    const n=2+Math.floor(rnd()*3);
+    for(let k=0;k<n;k++){
+      const m=new THREE.Mesh(new THREE.SphereGeometry(1+rnd()*0.9,10,8),lm(rnd()<.3?pick(greens):leaf));
+      m.scale.set(1,0.7+rnd()*0.5,1);
+      m.position.set(x+(rnd()-.5)*1.6,th+0.2+rnd()*0.9,z+(rnd()-.5)*1.6);scene.add(m);
+    }
+  }else if(type===1){
+    const layers=3+Math.floor(rnd()*3);let y=th*0.45,rad=1.6+rnd()*0.8;
+    const ph=(th*0.75)/layers+0.6;
+    for(let k=0;k<layers;k++){
+      const c=new THREE.Mesh(new THREE.ConeGeometry(rad,ph,8),lm(leaf));
+      c.position.set(x,y+ph/2,z);scene.add(c);y+=ph*0.65;rad*=0.72;
+    }
+  }else if(type===3){
+    const m=new THREE.Mesh(new THREE.SphereGeometry(0.9+rnd()*0.5,10,8),lm(leaf));
+    m.scale.set(1,1.5+rnd()*0.8,1);m.position.set(x,th+0.8,z);scene.add(m);
+  }
+}
+for(let i=0;i<18;i++){
+  const a=rnd()*6.28,r=4+rnd()*25;
+  const tx=Math.cos(a)*r,tz=Math.sin(a)*r;
+  if(!nearHub(tx,tz))addTree(tx,tz);
+}
+for(let i=0;i<12;i++){
+  const a=rnd()*6.28,r=4+rnd()*24,x=Math.cos(a)*r,z=Math.sin(a)*r,sz=0.7+rnd()*1.1;
+  if(nearHub(x,z))continue;
+  const m=new THREE.Mesh(new THREE.IcosahedronGeometry(sz,0),new THREE.MeshLambertMaterial({color:0x7d7d78,flatShading:true}));
+  m.scale.y=0.8;m.position.set(x,sz*0.8,z);m.rotation.y=rnd()*3;scene.add(m);
+  boxes.push({minX:x-sz*0.85,maxX:x+sz*0.85,minZ:z-sz*0.85,maxZ:z+sz*0.85,minY:0,top:sz*1.4});
+}
+
+// treehouse hub: tall tree, deck with a hole, computer, and a staircase
+{
+  const bark=0x6b4a2a,H=TH,wood=0x9a7a52;
+  addBox(0,-8,2.4,H+6,2.4,bark);                         // big trunk
+  const y0=H-0.5;
+  addBox(0,-10.85,12,0.5,6.3,wood,y0);                   // deck strips around the hole
+  addBox(0,-3.65,12,0.5,3.3,wood,y0);
+  addBox(-2.1,-6.5,7.8,0.5,2.4,wood,y0);
+  addBox(5.1,-6.5,1.8,0.5,2.4,wood,y0);
+  const pit=new THREE.Mesh(new THREE.PlaneGeometry(2.4,2.4),new THREE.MeshBasicMaterial({color:0x020202}));
+  pit.rotation.x=-Math.PI/2;pit.position.set(HOLE.x,H-0.9,HOLE.z);scene.add(pit);
+  // railings
+  addBox(0,-13.85,12,0.9,0.3,0x5e4124,H);
+  addBox(-5.85,-8,0.3,0.9,12,0x5e4124,H);
+  addBox(5.85,-8,0.3,0.9,12,0x5e4124,H);
+  addBox(-3.75,-2.15,4.5,0.9,0.3,0x5e4124,H);
+  addBox(3.75,-2.15,4.5,0.9,0.3,0x5e4124,H);
+  // staircase down the south side
+  for(let i=0;i<14;i++){
+    addBox(0,-1.35+(13-i)*1.3,3,(i+1)*0.5,1.3,i%2?0xa88a5a:0x937547);
+  }
+  // computer
+  const cz=-12.5,cxp=-2.5;
+  addBox(cxp,cz,1.1,0.9,0.5,0x3a3a40,H);
+  addBox(cxp,cz-0.15,1.0,0.65,0.1,0x1a1a1f,H+0.9);
+  const cv=document.createElement('canvas');cv.width=256;cv.height=160;
+  const cx=cv.getContext('2d');
+  cx.fillStyle='#06240f';cx.fillRect(0,0,256,160);
+  cx.fillStyle='#7dff7d';cx.font='bold 24px monospace';
+  cx.fillText('GORILLA',20,60);cx.fillText('COMPUTER',20,92);
+  cx.font='18px monospace';cx.fillText('coming soon...',20,128);
+  const scr=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.56),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv)}));
+  scr.position.set(cxp,H+1.225,cz-0.09);scene.add(scr);
+  // canopy high above the deck
+  for(let k=0;k<7;k++){
+    const m=new THREE.Mesh(new THREE.SphereGeometry(3+Math.random()*2,10,8),lm(k%2?0x2f8a2f:0x3c9a3a));
+    m.position.set((Math.random()-.5)*8,H+7+Math.random()*2,-8+(Math.random()-.5)*8);scene.add(m);
+  }
+}
+function addCone(x,z,rad,h,y0,flip,color){
+  const m=new THREE.Mesh(new THREE.ConeGeometry(rad,h,6),lm(color));
+  if(flip)m.rotation.x=Math.PI;
+  m.position.set(x,y0+h/2,z);scene.add(m);
+  const w=rad*0.7;
+  boxes.push({minX:x-w,maxX:x+w,minZ:z-w,maxZ:z+w,minY:y0,top:y0+h});
+}
+{
+  const fl=new THREE.Mesh(new THREE.PlaneGeometry(64,64),lm(0x2b2632));
+  fl.rotation.x=-Math.PI/2;fl.position.y=CY;scene.add(fl);
+  addBox(0,0,66,2,66,0x1c1822,CY+9);               // ceiling
+  for(const sx of[-1,1]){addBox(sx*32,0,2,12,66,0x1c1822,CY);addBox(0,sx*32,66,12,2,0x1c1822,CY);}
+  const free=(x,z)=>Math.hypot(x,z)>4&&Math.hypot(x-PORTAL.x,z-PORTAL.z)>4;
+  for(let i=0;i<16;i++){
+    const x=(rnd()-.5)*56,z=(rnd()-.5)*56;if(!free(x,z))continue;
+    addCone(x,z,0.6+rnd()*0.9,1.5+rnd()*3.5,CY,false,0x4a4350);
+  }
+  for(let i=0;i<12;i++){
+    const x=(rnd()-.5)*56,z=(rnd()-.5)*56,h=1.5+rnd()*3.5;
+    addCone(x,z,0.6+rnd()*0.8,h,CY+9-h,true,0x3a3542);
+  }
+  for(let i=0;i<9;i++){
+    const x=(rnd()-.5)*50,z=(rnd()-.5)*50;if(!free(x,z))continue;
+    addBox(x,z,2+rnd()*2.5,0.5,2+rnd()*2.5,0x5a5262,CY+1.3+rnd()*4.5);
+  }
+  const cc=[0x44ddff,0xff55cc,0x77ff55];
+  for(let i=0;i<26;i++){
+    const m=new THREE.Mesh(new THREE.ConeGeometry(0.12+rnd()*0.15,0.5+rnd()*0.9,5),new THREE.MeshBasicMaterial({color:cc[i%3]}));
+    m.position.set((rnd()-.5)*58,CY+0.4,(rnd()-.5)*58);m.rotation.z=(rnd()-.5)*0.6;scene.add(m);
+  }
+  const pl=new THREE.PointLight(0x66aaff,1.2,28);pl.position.set(-12,CY+6,-8);scene.add(pl);
+  const pl2=new THREE.PointLight(0xff66cc,1,28);pl2.position.set(12,CY+6,10);scene.add(pl2);
+  const por=new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.2,5,20,1,true),new THREE.MeshBasicMaterial({color:0x66ffee,transparent:true,opacity:0.35,side:THREE.DoubleSide}));
+  por.position.set(PORTAL.x,CY+2.5,PORTAL.z);scene.add(por);
+  const pr=new THREE.Mesh(new THREE.TorusGeometry(1.2,0.08,8,24),new THREE.MeshBasicMaterial({color:0xaaffff}));
+  pr.rotation.x=Math.PI/2;pr.position.set(PORTAL.x,CY+0.1,PORTAL.z);scene.add(pr);
+  const pl3=new THREE.PointLight(0x66ffee,1.4,18);pl3.position.set(PORTAL.x,CY+3,PORTAL.z);scene.add(pl3);
+}
+function tp(into){
+  camera.getWorldPosition(head);
+  const ox=head.x-rig.position.x,oz=head.z-rig.position.z;
+  inCave=into;floorY=into?CY:0;
+  const tx=into?0:SPAWN.x,tz=into?0:SPAWN.z;
+  rig.position.set(tx-ox,into?floorY+0.3:SPAWN.y,tz-oz);vel.set(0,0,0);
+  hands.forEach(h=>{h.last=null;});
+  scene.background.set(into?0x07070d:0x9bd36a);
+  scene.fog.color.set(into?0x07070d:0x9bd36a);
+  scene.fog.near=into?6:15;scene.fog.far=into?32:60;
+  hemi.intensity=into?0.5:1.1;sun.intensity=into?0.05:0.6;
+}
+
+// bots
+const bots=[];
+function makeGorilla(color){
+  const g=new THREE.Group();
+  const mat=new THREE.MeshLambertMaterial({color});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.9,0.5),mat);body.position.y=0.6;g.add(body);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.35,0.4),mat);head.position.y=1.25;g.add(head);
+  for(const s of[-1,1]){const arm=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.9,0.2),mat);arm.position.set(s*0.55,0.45,0.1);g.add(arm);}
+  scene.add(g);return g;
+}
+function resetBots(){bots.forEach((b,i)=>{const a=i*2.1+rnd()*2;b.mesh.position.set(Math.cos(a)*18,0,Math.sin(a)*18);});}
+let mode='casual';
+function setMode(m){
+  mode=m;bots.forEach(b=>scene.remove(b.mesh));bots.length=0;
+  const cols=[0x3b82f6,0xf5c518,0xa855f7,0x22c55e,0xff8c1a,0x14b8a6];
+  let ci=0;
+  for(const k in MAPS){
+    const n=MAPS[k][m];
+    for(let i=0;i<n;i++)bots.push({map:k,mesh:makeGorilla(m==='infection'?0xcc2222:cols[ci++%6]),tx:0,tz:0,wt:0});
+  }
+  if(MP.on&&m==='infection'){bots.forEach(b=>scene.remove(b.mesh));bots.length=0;}
+  resetBots();time=0;vel.set(0,0,0);rig.position.set(SPAWN.x,SPAWN.y,SPAWN.z);
+}
+
+// hands
+const hands=[];
+for(let i=0;i<2;i++){
+  const c=renderer.xr.getController(i);
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(0.08,12,10),new THREE.MeshLambertMaterial({color:i?0x333333:0x555555}));
+  body.add(mesh);body.add(c);
+  const h={c,mesh,last:null,touch:false};
+  c.addEventListener('connected',e=>{h.gp=e.data.gamepad;h.side=e.data.handedness;if(h.side==='left')c.add(hud);});
+  hands.push(h);
+}
+
+// HUD on left wrist
+const hc=document.createElement('canvas');hc.width=256;hc.height=128;
+const htex=new THREE.CanvasTexture(hc);
+const hud=new THREE.Mesh(new THREE.PlaneGeometry(0.16,0.08),new THREE.MeshBasicMaterial({map:htex,transparent:true}));
+hud.position.set(0,0.07,0.05);hud.rotation.x=-1.1;
+function drawHud(){
+  const x=hc.getContext('2d');
+  x.fillStyle='rgba(10,25,5,.85)';x.fillRect(0,0,256,128);
+  x.fillStyle='#bff25a';x.font='bold 26px sans-serif';
+  if(mode==='casual'){x.fillText('Casual',14,36);x.fillText('No tags',14,72);}
+  else{x.fillText('Time '+time.toFixed(1)+'s',14,36);x.fillText('Best '+best.toFixed(1)+'s',14,72);}
+  x.fillStyle='#333';x.fillRect(14,92,228,18);
+  x.fillStyle=cool>0?'#e8a020':'#8bd22a';x.fillRect(14,92,228*(1-Math.max(cool,0)/COOL),18);
+  x.font='15px sans-serif';x.fillStyle='#bff25a';
+  if(MP.on)x.fillText('Room '+MP.code+' - '+(MP.n+1)+' players'+(MP.infected?' - INFECTED':''),14,124);
+  htex.needsUpdate=true;
+}
+
+// haptics
+function buzz(h,i,ms){
+  const g=h.gp;if(!g)return;
+  try{
+    const a=g.hapticActuators&&g.hapticActuators[0];
+    if(a&&a.pulse)a.pulse(i,ms);
+    else if(g.vibrationActuator)g.vibrationActuator.playEffect('dual-rumble',{duration:ms,strongMagnitude:i,weakMagnitude:i});
+  }catch(e){}
+}
+
+// audio
+let ac=null;
+function fartSound(){
+  if(!ac)return;const t=ac.currentTime;
+  const o=ac.createOscillator(),g=ac.createGain(),l=ac.createOscillator(),lg=ac.createGain();
+  o.type='sawtooth';
+  o.frequency.setValueAtTime(120+Math.random()*50,t);
+  o.frequency.exponentialRampToValueAtTime(40,t+0.5);
+  l.frequency.value=40+Math.random()*20;lg.gain.value=30;
+  l.connect(lg);lg.connect(o.frequency);
+  g.gain.setValueAtTime(0.5,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.55);
+  o.connect(g);g.connect(ac.destination);
+  o.start(t);l.start(t);o.stop(t+0.6);l.stop(t+0.6);
+}
+
+// puffs
+const puffs=[];
+const puffGeo=new THREE.SphereGeometry(0.2,8,6);
+function spawnPuffs(pos,dir){
+  for(let i=0;i<8;i++){
+    const m=new THREE.Mesh(puffGeo,new THREE.MeshBasicMaterial({color:0x9acd32,transparent:true,opacity:0.7}));
+    m.position.copy(pos).addScaledVector(dir,-0.1*i).add(new THREE.Vector3((rnd()-.5)*.3,(rnd()-.5)*.3,(rnd()-.5)*.3));
+    scene.add(m);puffs.push({m,life:1});
+  }
+}
+
+// state
+const vel=new THREE.Vector3();
+const REACH=1,COOL=0.7;let cool=0,boostT=0,time=0,best=0,hudT=0,prevBtn=false;
+const tmp=new THREE.Vector3(),head=new THREE.Vector3(),fwd=new THREE.Vector3();
+
+function fart(){
+  if(cool>0)return;
+  camera.getWorldPosition(head);camera.getWorldDirection(fwd);
+  tmp.copy(fwd);tmp.y+=0.35;tmp.normalize();
+  vel.addScaledVector(tmp,7);
+  if(vel.length()>13)vel.setLength(13);
+  boostT=0.25;cool=COOL;fartCount++;
+  spawnPuffs(head.clone().add(new THREE.Vector3(0,-0.5,0)).addScaledVector(fwd,-0.2),fwd);
+  fartSound();
+  hands.forEach(h=>buzz(h,0.8,120));
+}
+addEventListener('keydown',e=>{if(e.code==='Space'){ac=ac||new (window.AudioContext||window.webkitAudioContext)();fart();}});
+
+function inBox(p,b,r){return p.x>b.minX-r&&p.x<b.maxX+r&&p.z>b.minZ-r&&p.z<b.maxZ+r&&p.y>b.minY-r&&p.y<b.top+r;}
+
+function tagged(){
+  if(inCave)tp(false);
+  best=Math.max(best,time);time=0;vel.set(0,0,0);
+  rig.position.set(SPAWN.x,SPAWN.y,SPAWN.z);resetBots();
+}
+
+// ===== multiplayer (Firebase Realtime Database) =====
+const FIREBASE_CONFIG={
+  apiKey:"AIzaSyASHnqIL0kTE7hnfnwTNYMJBSIqwXvUZlI",
+  authDomain:"gorilla-fart-vr.firebaseapp.com",
+  databaseURL:"https://gorilla-fart-vr-default-rtdb.firebaseio.com",
+  projectId:"gorilla-fart-vr",
+  storageBucket:"gorilla-fart-vr.firebasestorage.app",
+  messagingSenderId:"934560681387",
+  appId:"1:934560681387:web:0432beb1233ee48f0216ee"
+};
+const MP={on:false,code:'',id:null,mode:'casual',infected:false,n:0,remotes:{},off:0};
+let db=null,fartCount=0,mpT=0,mpS=0;
+const mh=new THREE.Vector3(),mf=new THREE.Vector3();
+const AV_COLS=[0x3b82f6,0xf5c518,0xa855f7,0x22c55e,0xff8c1a,0x14b8a6];
+function makeAvatar(id){
+  let hsh=0;for(const ch of id)hsh+=ch.charCodeAt(0);
+  const base=AV_COLS[hsh%6],mat=new THREE.MeshLambertMaterial({color:base});
+  const g=new THREE.Group();
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.3,0.32),mat);
+  const body=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.7,0.35),mat);
+  const l=new THREE.Mesh(new THREE.SphereGeometry(0.09,10,8),mat);
+  const r=new THREE.Mesh(new THREE.SphereGeometry(0.09,10,8),mat);
+  g.add(head,body,l,r);scene.add(g);
+  return {g,head,body,l,r,mat,base,f:0,inf:false,init:false,seen:Date.now(),tagged:0};
+}
+function remoteFart(r){
+  spawnPuffs(r.head.position.clone().add(new THREE.Vector3(0,-0.5,0)),new THREE.Vector3(0,0,1));
+  fartSound();
+}
+function mpReady(){return typeof firebase!=='undefined'&&FIREBASE_CONFIG.apiKey!=='YOUR_API_KEY';}
+async function mpJoin(code,m){
+  if(!mpReady())throw new Error('Multiplayer not set up yet: add your Firebase config to the file.');
+  if(!firebase.apps.length)firebase.initializeApp(FIREBASE_CONFIG);
+  const cred=await firebase.auth().signInAnonymously();
+  MP.id=cred.user.uid;db=firebase.database();
+  MP.off=(await db.ref('.info/serverTimeOffset').once('value')).val()||0;
+  const base=db.ref('rooms/'+code);
+  const snap=await base.child('players').once('value');
+  const now=Date.now()+MP.off,others=[];
+  snap.forEach(c=>{const v=c.val();if(c.key!==MP.id&&v&&now-v.ts<6000)others.push({id:c.key,inf:v.inf});});
+  if(others.length>=10)throw new Error('That room is full (10 players).');
+  let rm=m;
+  if(others.length){rm=(await base.child('mode').once('value')).val()||m;}
+  else await base.child('mode').set(m);
+  MP.on=true;MP.code=code;MP.mode=rm;
+  MP.infected=rm==='infection'&&!others.some(o=>o.inf);
+  MP.ref=base.child('players/'+MP.id);MP.ref.onDisconnect().remove();
+  MP.tagRef=base.child('tags/'+MP.id);MP.tagRef.remove();
+  MP.tagRef.on('value',sn=>{if(sn.exists()&&MP.mode==='infection'&&!MP.infected){MP.infected=true;MP.tagRef.remove();}});
+  MP.players=base.child('players');
+  MP.players.on('value',sn=>{
+    sn.forEach(c=>{
+      if(c.key===MP.id)return;const v=c.val();if(!v)return;
+      let r=MP.remotes[c.key];
+      if(!r){r=MP.remotes[c.key]=makeAvatar(c.key);r.f=v.f||0;}
+      r.t=v;r.inf=!!v.inf;r.seen=Date.now();
+      if((v.f||0)!==r.f){r.f=v.f||0;remoteFart(r);}
+    });
+  });
+  return rm;
+}
+function mpLeave(){
+  if(!MP.on)return;
+  MP.on=false;
+  try{MP.players.off();MP.tagRef.off();MP.ref.remove();}catch(e){}
+  for(const k in MP.remotes){scene.remove(MP.remotes[k].g);}
+  MP.remotes={};MP.infected=false;MP.n=0;
+}
+function mpUpdate(dt){
+  if(!MP.on)return;
+  const nowL=Date.now();
+  mpT+=dt;mpS+=dt;
+  if(mpT>=0.1){
+    mpT=0;
+    camera.getWorldPosition(mh);camera.getWorldDirection(mf);
+    const q=v=>Math.round(v*100)/100,hw=h=>h.world?[q(h.world.x),q(h.world.y),q(h.world.z)]:[0,0,0];
+    MP.ref.set({ts:Date.now()+MP.off,h:[q(mh.x),q(mh.y),q(mh.z),q(Math.atan2(mf.x,mf.z))],l:hw(hands[0]),r:hw(hands[1]),f:fartCount,inf:MP.infected?1:0});
+    hands.forEach((h,i)=>h.mesh.material.color.set(MP.infected?0xcc2222:(i?0x333333:0x555555)));
+  }
+  const a=Math.min(1,dt*15);
+  for(const k in MP.remotes){
+    const r=MP.remotes[k];
+    if(nowL-r.seen>6000){scene.remove(r.g);delete MP.remotes[k];continue;}
+    const t=r.t;if(!t||!t.h||!t.l||!t.r)continue;
+    const set=(m,v,off)=>{mh.set(v[0],v[1]+(off||0),v[2]);if(!r.init)m.position.copy(mh);else m.position.lerp(mh,a);};
+    set(r.head,t.h);set(r.body,t.h,-0.55);set(r.l,t.l);set(r.r,t.r);
+    r.init=true;r.head.rotation.y=r.body.rotation.y=t.h[3];
+    r.mat.color.set(r.inf?0xcc2222:r.base);
+  }
+  MP.n=Object.keys(MP.remotes).length;
+  if(MP.mode==='infection'){
+    if(MP.infected){
+      camera.getWorldPosition(mh);
+      for(const k in MP.remotes){
+        const r=MP.remotes[k];if(r.inf||r.tagged>nowL||!r.init)continue;
+        let hd=9;hands.forEach(h=>{if(h.world)hd=Math.min(hd,h.world.distanceTo(r.head.position));});
+        if(r.head.position.distanceTo(mh)<0.9||hd<0.5){
+          r.inf=true;r.tagged=nowL+2000;
+          db.ref('rooms/'+MP.code+'/tags/'+k).set(nowL);
+        }
+      }
+    }else if(mpS>=1){
+      mpS=0;
+      const ks=Object.keys(MP.remotes);
+      if(ks.length&&!ks.some(k=>MP.remotes[k].inf)&&ks.every(k=>MP.id<k))MP.infected=true;
+    }
+  }
+}
+
+const clock=new THREE.Clock();
+renderer.setAnimationLoop(()=>{
+  const dt=Math.min(clock.getDelta(),0.05);
+  time+=dt;cool-=dt;boostT-=dt;
+
+  // face buttons
+  let pressed=false;
+  for(const h of hands){if(h.gp&&h.gp.buttons&&((h.gp.buttons[4]&&h.gp.buttons[4].pressed)||(h.gp.buttons[5]&&h.gp.buttons[5].pressed)))pressed=true;}
+  if(pressed&&!prevBtn)fart();
+  prevBtn=pressed;
+
+  // hand locomotion
+  const move=new THREE.Vector3();let n=0;
+  for(const h of hands){
+    // extended "gorilla arms": hand reach is scaled out from the head
+    const lp=camera.position.clone().add(h.c.position.clone().sub(camera.position).multiplyScalar(REACH));
+    h.mesh.position.copy(lp);
+    tmp.copy(lp).add(rig.position);tmp.y-=DROP;
+    h.world=(h.world||new THREE.Vector3()).copy(tmp);
+    let touch=tmp.y<floorY+0.07;
+    if(!touch)for(const b of boxes){if(inBox(tmp,b,0.07)){touch=true;break;}}
+    if(touch&&h.last){
+      const d=lp.clone().sub(h.last);
+      if(d.length()<0.6){move.sub(d);n++;}
+    }
+    if(touch&&!h.touch){
+      const sp=h.last?lp.distanceTo(h.last)/Math.max(dt,0.001):0;
+      buzz(h,Math.min(0.25+sp*0.2,1),50);
+    }
+    h.touch=touch;h.last=lp.clone();
+  }
+  if(n>0){
+    move.divideScalar(n);
+    rig.position.add(move);
+    if(boostT<=0){
+      const v=move.clone().divideScalar(Math.max(dt,0.001));
+      if(v.length()>10)v.setLength(10);
+      vel.lerp(v,0.7);
+    }
+  }else{
+    vel.y-=9.8*dt;
+    rig.position.addScaledVector(vel,dt);
+    vel.multiplyScalar(1-0.25*dt);
+  }
+
+  // floor / platform / bounds
+  for(const b of boxes){
+    const p=rig.position;
+    if(p.x>b.minX&&p.x<b.maxX&&p.z>b.minZ&&p.z<b.maxZ&&p.y<b.top&&p.y>b.top-0.6&&vel.y<=0){p.y=b.top;vel.y=0;}
+  }
+  camera.getWorldPosition(head);
+  // body collision: push your head out of walls, trunks and railings
+  for(const b of boxes){
+    const m=0.25;
+    if(head.x>b.minX-m&&head.x<b.maxX+m&&head.z>b.minZ-m&&head.z<b.maxZ+m&&head.y>b.minY-0.1&&head.y<b.top+0.1&&rig.position.y<b.top-0.6){
+      const o=[head.x-(b.minX-m),(b.maxX+m)-head.x,head.z-(b.minZ-m),(b.maxZ+m)-head.z];
+      const k=o.indexOf(Math.min(...o)),amt=o[k];
+      if(k===0){rig.position.x-=amt;head.x-=amt;vel.x=Math.min(vel.x,0);}
+      else if(k===1){rig.position.x+=amt;head.x+=amt;vel.x=Math.max(vel.x,0);}
+      else if(k===2){rig.position.z-=amt;head.z-=amt;vel.z=Math.min(vel.z,0);}
+      else{rig.position.z+=amt;head.z+=amt;vel.z=Math.max(vel.z,0);}
+    }
+  }
+  if(!inCave&&Math.abs(head.x-HOLE.x)<HOLE.hs*0.85&&Math.abs(head.z-HOLE.z)<HOLE.hs*0.85&&rig.position.y>HOLE.y-4){
+    if(rig.position.y<HOLE.y-1.5)tp(true);
+  }else if(rig.position.y<floorY){rig.position.y=floorY;if(vel.y<0)vel.y=0;vel.x*=0.9;vel.z*=0.9;}
+  if(inCave&&Math.hypot(head.x-PORTAL.x,head.z-PORTAL.z)<1.3)tp(false);
+  if(Math.abs(rig.position.x)>30){rig.position.x=Math.sign(rig.position.x)*30;vel.x=0;}
+  if(Math.abs(rig.position.z)>30){rig.position.z=Math.sign(rig.position.z)*30;vel.z=0;}
+
+  // bots
+  camera.getWorldPosition(head);
+  const speed=3+Math.min(time*0.05,2.5);
+  for(const b of bots){
+    b.mesh.visible=(b.map==='cave')===inCave;
+    if(!b.mesh.visible)continue;
+    const m=b.mesh.position;
+    tmp.set(head.x-m.x,0,head.z-m.z);
+    let d=tmp.length(),sp=speed;
+    if(mode==='casual'){
+      b.wt-=dt;
+      if(b.wt<=0){b.tx=(Math.random()-.5)*50;b.tz=(Math.random()-.5)*50;b.wt=4+Math.random()*5;}
+      tmp.set(b.tx-m.x,0,b.tz-m.z);d=tmp.length();sp=1.5;
+    }
+    if(d>0.01){tmp.normalize();m.addScaledVector(tmp,sp*dt);b.mesh.rotation.y=Math.atan2(tmp.x,tmp.z);}
+    b.mesh.position.y=MAPS[b.map].floor+Math.abs(Math.sin(time*8))*0.1;
+    if(mode==='infection'&&d<0.8&&head.y<m.y+1.7&&head.y>m.y-0.4){tagged();break;}
+  }
+
+  // puffs
+  for(let i=puffs.length-1;i>=0;i--){
+    const p=puffs[i];p.life-=dt;
+    p.m.scale.multiplyScalar(1+dt*1.5);p.m.material.opacity=Math.max(p.life,0)*0.7;
+    if(p.life<=0){scene.remove(p.m);p.m.material.dispose();puffs.splice(i,1);}
+  }
+
+  mpUpdate(dt);hudT-=dt;if(hudT<=0){drawHud();hudT=0.2;}
+  renderer.render(scene,camera);
+});
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+
+// enter VR
+const ui=document.getElementById('ui'),msg=document.getElementById('msg');
+async function start(m){
+  ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();
+  const code=document.getElementById('room').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!navigator.xr){msg.textContent='WebXR not available. Open this page in the Meta Quest Browser.';return;}
+  let s=null;
+  try{
+    const ok=await navigator.xr.isSessionSupported('immersive-vr');
+    if(ok){
+      s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
+      s.addEventListener('end',()=>{ui.style.display='flex';mpLeave();});
+      await renderer.xr.setSession(s);
+    }
+    let use=m;
+    if(code){
+      try{use=await mpJoin(code,m);}
+      catch(err){msg.textContent=err.message;if(s)s.end();return;}
+    }
+    setMode(use);
+    ui.style.display='none';
+  }catch(e){msg.textContent='Could not start VR: '+e.message;}
+}
+document.getElementById('rand').onclick=()=>{document.getElementById('room').value=Math.random().toString(36).slice(2,6).toUpperCase();};
+document.getElementById('casual').onclick=()=>start('casual');
+document.getElementById('infection').onclick=()=>start('infection');
+</script>
+</body>
+</html>
