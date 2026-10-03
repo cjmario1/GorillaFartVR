@@ -520,7 +520,7 @@ renderer.domElement.addEventListener('mousedown',e=>{
 });
 const dv=new THREE.Vector3();
 function desktopUpdate(dt){
-  if(VR())return;
+  if(VR()){hands.forEach(h=>{h.mesh.visible=true;});return;}
   hands.forEach(h=>{h.mesh.visible=false;});
   const f=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0);
   const r=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0);
