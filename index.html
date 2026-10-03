@@ -12,7 +12,9 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:
 #ui{background:var(--bg);overflow:auto;position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;z-index:2}
 h1{font-size:clamp(34px,9vw,72px);margin:0 0 8px;color:var(--ac)}
 p{max-width:520px;line-height:1.5;margin:6px 0}
-input{font-size:20px;padding:12px;border-radius:12px;border:2px solid var(--ac);background:transparent;color:var(--fg);text-align:center;text-transform:uppercase;width:160px}
+#room{font-size:20px;padding:12px;border-radius:12px;border:2px solid var(--ac);background:transparent;color:var(--fg);text-align:center;text-transform:uppercase;width:160px}
+#hud{position:fixed;top:10px;left:10px;background:rgba(0,0,0,.55);color:#eaffc8;padding:10px 14px;border-radius:10px;font:14px/1.5 system-ui,sans-serif;white-space:pre;pointer-events:none;display:none;z-index:1}
+#cross{position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:#fff;opacity:.8;pointer-events:none;display:none;z-index:1}
 button.sm{font-size:16px;padding:10px 16px;margin-top:0}
 button.inf{background:#e24b4b;color:#fff}
 .row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
@@ -23,13 +25,16 @@ button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:1
 <div id="ui">
   <h1>💨 GORILLA FART</h1>
   <p>Swing your arms and push off the ground, walls and trees to move. Press <b>A / B / X / Y</b> to rip a fart boost in the direction you're looking.</p>
+  <p><b>On a computer:</b> WASD to move, Space to jump (hold it against walls and trees to climb), and F, Shift or click to fart.</p>
   <p><b>Casual:</b> chill out with colorful gorillas that just wander around.<br><b>Infection:</b> red gorillas hunt you down. Survive as long as you can!</p>
-  <p>Climb the staircase up the giant tree, check out the computer, then drop into the hole to explore the caves. Walk into the glowing portal to climb back out. The caves have gorillas too, so watch out!</p>
+  <p>Climb the staircase up the giant tree, check out the computer, then drop into the hole to explore the caves. Walk into the glowing portal to climb back out. The caves have gorillas too, so watch out! A glowing orange portal out in the forest leads to the city.</p>
   <p>Friends: type the same <b>room code</b> to play together. Leave it blank to play solo.</p>
   <div class="row" style="margin-top:6px"><input id="room" maxlength="4" placeholder="ROOM CODE"><button id="rand" class="sm">Random</button></div>
+  <label style="margin-top:12px;cursor:pointer"><input type="checkbox" id="pc"> Play on computer (keyboard &amp; mouse)</label>
   <div class="row"><button id="casual">Casual</button><button id="infection" class="inf">Infection</button></div>
   <p id="msg" style="opacity:.8"></p>
 </div>
+<div id="hud"></div><div id="cross"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -59,8 +64,10 @@ const TH=7; // treehouse deck height
 const HOLE={x:3,z:-6.5,hs:1.2,y:TH},CY=-40,PORTAL={x:22,z:-20},SPAWN={x:-2.5,y:TH,z:-4.5};
 const nearHub=(x,z)=>(Math.abs(x)<11&&z>-19&&z<3)||(Math.abs(x)<7&&z>=3&&z<22);
 // MAPS: every map needs an entry here so it always has gorillas (counts per mode)
-const MAPS={forest:{floor:0,casual:6,infection:3},cave:{floor:CY,casual:5,infection:3}};
-let inCave=false,floorY=0;
+const CITY_Y=-100,FP={x:-20,z:-16},CITY_SPAWN={x:10,z:10},CITY_EXIT={x:-10,z:-10};
+const MAPS={forest:{floor:0,casual:6,infection:3},cave:{floor:CY,casual:5,infection:3},city:{floor:CITY_Y,casual:5,infection:3}};
+const ENV={forest:{bg:0x9bd36a,fog:[15,60],hemi:1.1,sun:0.6},cave:{bg:0x07070d,fog:[6,32],hemi:0.5,sun:0.05},city:{bg:0x8ec5ff,fog:[28,62],hemi:1.0,sun:0.7}};
+let curMap='forest',floorY=0;
 let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
 function addBox(x,z,w,h,d,color,y0=0){
   const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color}));
@@ -111,11 +118,11 @@ function addTree(x,z){
 for(let i=0;i<18;i++){
   const a=rnd()*6.28,r=4+rnd()*25;
   const tx=Math.cos(a)*r,tz=Math.sin(a)*r;
-  if(!nearHub(tx,tz))addTree(tx,tz);
+  if(!nearHub(tx,tz)&&Math.hypot(tx-FP.x,tz-FP.z)>4)addTree(tx,tz);
 }
 for(let i=0;i<12;i++){
   const a=rnd()*6.28,r=4+rnd()*24,x=Math.cos(a)*r,z=Math.sin(a)*r,sz=0.7+rnd()*1.1;
-  if(nearHub(x,z))continue;
+  if(nearHub(x,z)||Math.hypot(x-FP.x,z-FP.z)<4)continue;
   const m=new THREE.Mesh(new THREE.IcosahedronGeometry(sz,0),new THREE.MeshLambertMaterial({color:0x7d7d78,flatShading:true}));
   m.scale.y=0.8;m.position.set(x,sz*0.8,z);m.rotation.y=rnd()*3;scene.add(m);
   boxes.push({minX:x-sz*0.85,maxX:x+sz*0.85,minZ:z-sz*0.85,maxZ:z+sz*0.85,minY:0,top:sz*1.4});
@@ -198,17 +205,72 @@ function addCone(x,z,rad,h,y0,flip,color){
   pr.rotation.x=Math.PI/2;pr.position.set(PORTAL.x,CY+0.1,PORTAL.z);scene.add(pr);
   const pl3=new THREE.PointLight(0x66ffee,1.4,18);pl3.position.set(PORTAL.x,CY+3,PORTAL.z);scene.add(pl3);
 }
-function tp(into){
+// ===== city map =====
+function label(text,x,y,z,color){
+  const c=document.createElement('canvas');c.width=256;c.height=96;
+  const g=c.getContext('2d');g.fillStyle=color;g.font='bold 64px sans-serif';g.textAlign='center';g.fillText(text,128,70);
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(2.6,0.98),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),transparent:true,side:THREE.DoubleSide}));
+  m.position.set(x,y,z);scene.add(m);
+}
+function portalAt(x,y,z,col,text){
+  const p=new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.2,5,20,1,true),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.4,side:THREE.DoubleSide}));
+  p.position.set(x,y+2.5,z);scene.add(p);
+  const r=new THREE.Mesh(new THREE.TorusGeometry(1.2,0.08,8,24),new THREE.MeshBasicMaterial({color:col}));
+  r.rotation.x=Math.PI/2;r.position.set(x,y+0.1,z);scene.add(r);
+  label(text,x,y+6,z,'#'+col.toString(16).padStart(6,'0'));
+}
+portalAt(FP.x,0,FP.z,0xffaa33,'CITY');
+{
+  const wc=document.createElement('canvas');wc.width=wc.height=64;
+  const g=wc.getContext('2d');g.fillStyle='#e8e8e8';g.fillRect(0,0,64,64);
+  g.fillStyle='#6f93b5';g.fillRect(10,12,44,40);g.fillStyle='#ffe9a0';g.fillRect(14,16,16,14);
+  const winBase=new THREE.CanvasTexture(wc);winBase.wrapS=winBase.wrapT=THREE.RepeatWrapping;
+  const wmat=(color,rx,ry)=>{const t=winBase.clone();t.needsUpdate=true;t.repeat.set(Math.max(1,Math.round(rx)),Math.max(1,Math.round(ry)));return new THREE.MeshLambertMaterial({color,map:t});};
+  function bldg(x,z,w,h,d,color){
+    const mx=wmat(color,d/2.5,h/3),mz=wmat(color,w/2.5,h/3),top=lm(0x55555a);
+    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),[mx,mx,top,top,mz,mz]);
+    m.position.set(x,CITY_Y+h/2,z);scene.add(m);
+    boxes.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2,minY:CITY_Y,top:CITY_Y+h});
+    for(let k=0;k<1+Math.floor(rnd()*2);k++){
+      if(w>3&&d>3)addBox(x+(rnd()-.5)*(w-2),z+(rnd()-.5)*(d-2),1.1,0.8,1.1,0x777780,CITY_Y+h);
+    }
+  }
+  const road=new THREE.Mesh(new THREE.PlaneGeometry(66,66),lm(0x36363c));
+  road.rotation.x=-Math.PI/2;road.position.y=CITY_Y;scene.add(road);
+  const pal=[0xc9a98a,0x9fb4c8,0xd0c27a,0xb87b6a,0x9bb89a,0xc4c4cc,0xa58fb8];
+  for(const bx of[-20,0,20])for(const bz of[-20,0,20]){
+    addBox(bx,bz,14,0.15,14,0x9a9a95,CITY_Y);               // sidewalk
+    if(bx===0&&bz===0){bldg(0,0,5,20,5,0xc4c4cc);continue;} // central tower
+    for(const qx of[-1,1])for(const qz of[-1,1]){
+      if(rnd()<0.18)continue;                                 // open plaza
+      const w=5+rnd()*1.2,d=5+rnd()*1.2,h=rnd()<0.3?3.5+rnd()*2:6+rnd()*10;
+      bldg(bx+qx*3.5,bz+qz*3.5,w,h,d,pal[Math.floor(rnd()*pal.length)]);
+    }
+  }
+  // parked cars on the streets
+  const carCols=[0xcc3333,0x3366cc,0xe0c020,0x33aa55,0xeeeeee,0x222222];
+  for(let i=0;i<14;i++){
+    const alongX=rnd()<0.5,t=(rnd()-.5)*50,line=(rnd()<.5?-10:10)+(rnd()<.5?-1.6:1.6);
+    if(Math.abs(Math.abs(t)-10)<4)continue;
+    addBox(alongX?t:line,alongX?line:t,alongX?4:1.8,1.2,alongX?1.8:4,carCols[i%6],CITY_Y);
+  }
+  portalAt(CITY_EXIT.x,CITY_Y,CITY_EXIT.z,0x66ffee,'FOREST');
+}
+
+function tp(map){
   camera.getWorldPosition(head);
-  const ox=head.x-rig.position.x,oz=head.z-rig.position.z;
-  inCave=into;floorY=into?CY:0;
-  const tx=into?0:SPAWN.x,tz=into?0:SPAWN.z;
-  rig.position.set(tx-ox,into?floorY+0.3:SPAWN.y,tz-oz);vel.set(0,0,0);
+  const ox=head.x-rig.position.x,oz=head.z-rig.position.z,from=curMap;
+  curMap=map;floorY=MAPS[map].floor;
+  let tx,tz,ty;
+  if(map==='cave'){tx=0;tz=0;ty=floorY+0.3;}
+  else if(map==='city'){tx=CITY_SPAWN.x;tz=CITY_SPAWN.z;ty=floorY+0.3;}
+  else if(from==='city'){tx=FP.x+3;tz=FP.z;ty=0;}
+  else{tx=SPAWN.x;tz=SPAWN.z;ty=SPAWN.y;}
+  rig.position.set(tx-ox,ty,tz-oz);vel.set(0,0,0);
   hands.forEach(h=>{h.last=null;});
-  scene.background.set(into?0x07070d:0x9bd36a);
-  scene.fog.color.set(into?0x07070d:0x9bd36a);
-  scene.fog.near=into?6:15;scene.fog.far=into?32:60;
-  hemi.intensity=into?0.5:1.1;sun.intensity=into?0.05:0.6;
+  const e=ENV[map];
+  scene.background.set(e.bg);scene.fog.color.set(e.bg);scene.fog.near=e.fog[0];scene.fog.far=e.fog[1];
+  hemi.intensity=e.hemi;sun.intensity=e.sun;
 }
 
 // bots
@@ -316,12 +378,12 @@ function fart(){
   fartSound();
   hands.forEach(h=>buzz(h,0.8,120));
 }
-addEventListener('keydown',e=>{if(e.code==='Space'){ac=ac||new (window.AudioContext||window.webkitAudioContext)();fart();}});
+
 
 function inBox(p,b,r){return p.x>b.minX-r&&p.x<b.maxX+r&&p.z>b.minZ-r&&p.z<b.maxZ+r&&p.y>b.minY-r&&p.y<b.top+r;}
 
 function tagged(){
-  if(inCave)tp(false);
+  if(curMap!=='forest')tp('forest');
   best=Math.max(best,time);time=0;vel.set(0,0,0);
   rig.position.set(SPAWN.x,SPAWN.y,SPAWN.z);resetBots();
 }
@@ -401,8 +463,9 @@ function mpUpdate(dt){
   if(mpT>=0.1){
     mpT=0;
     camera.getWorldPosition(mh);camera.getWorldDirection(mf);
-    const q=v=>Math.round(v*100)/100,hw=h=>h.world?[q(h.world.x),q(h.world.y),q(h.world.z)]:[0,0,0];
-    MP.ref.set({ts:Date.now()+MP.off,h:[q(mh.x),q(mh.y),q(mh.z),q(Math.atan2(mf.x,mf.z))],l:hw(hands[0]),r:hw(hands[1]),f:fartCount,inf:MP.infected?1:0});
+    const q=v=>Math.round(v*100)/100,yw=Math.atan2(mf.x,mf.z);
+    const hw=(h,sd)=>VR()&&h.world?[q(h.world.x),q(h.world.y),q(h.world.z)]:[q(mh.x+Math.cos(yw)*sd*0.35+Math.sin(yw)*0.2),q(mh.y-0.6),q(mh.z-Math.sin(yw)*sd*0.35+Math.cos(yw)*0.2)];
+    MP.ref.set({ts:Date.now()+MP.off,h:[q(mh.x),q(mh.y),q(mh.z),q(yw)],l:hw(hands[0],-1),r:hw(hands[1],1),f:fartCount,inf:MP.infected?1:0});
     hands.forEach((h,i)=>h.mesh.material.color.set(MP.infected?0xcc2222:(i?0x333333:0x555555)));
   }
   const a=Math.min(1,dt*15);
@@ -435,6 +498,67 @@ function mpUpdate(dt){
   }
 }
 
+// ===== computer (keyboard + mouse) mode =====
+const keys={};let yaw=0,pitch=0;
+const VR=()=>renderer.xr.isPresenting;
+camera.rotation.order='YXZ';
+addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(e.code==='Space'&&!VR())e.preventDefault();
+  if(!VR()&&!e.repeat&&(e.code==='KeyF'||e.code==='ShiftLeft'||e.code==='ShiftRight')){ac=ac||new (window.AudioContext||window.webkitAudioContext)();fart();}
+});
+addEventListener('keyup',e=>{keys[e.code]=false;});
+addEventListener('mousemove',e=>{
+  if(VR()||document.pointerLockElement!==renderer.domElement)return;
+  yaw-=e.movementX*0.0025;pitch=Math.max(-1.5,Math.min(1.5,pitch-e.movementY*0.0025));
+  camera.rotation.set(pitch,yaw,0);
+});
+renderer.domElement.addEventListener('mousedown',e=>{
+  if(VR()||ui.style.display!=='none')return;
+  if(document.pointerLockElement!==renderer.domElement)renderer.domElement.requestPointerLock();
+  else if(e.button===0)fart();
+});
+const dv=new THREE.Vector3();
+function desktopUpdate(dt){
+  if(VR())return;
+  hands.forEach(h=>{h.mesh.visible=false;});
+  const f=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0);
+  const r=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0);
+  let wx=-Math.sin(yaw)*f+Math.cos(yaw)*r,wz=-Math.cos(yaw)*f-Math.sin(yaw)*r;
+  const wl=Math.hypot(wx,wz);if(wl>1){wx/=wl;wz/=wl;}
+  const p=rig.position;let gy=floorY;
+  for(const b of boxes){if(p.x>b.minX&&p.x<b.maxX&&p.z>b.minZ&&p.z<b.maxZ&&b.top<=p.y+0.05&&b.top>gy)gy=b.top;}
+  const grounded=p.y-gy<0.06&&vel.y<=0.1;
+  if(grounded){
+    const k=Math.min(1,dt*12);
+    vel.x+=(wx*6.5-vel.x)*k;vel.z+=(wz*6.5-vel.z)*k;
+    if(keys.Space)vel.y=5.8;
+  }else{
+    vel.x+=wx*10*dt;vel.z+=wz*10*dt;
+    const hs=Math.hypot(vel.x,vel.z);if(hs>14){vel.x*=14/hs;vel.z*=14/hs;}
+    if(keys.Space){
+      camera.getWorldPosition(dv);
+      for(const b of boxes){
+        if(dv.x>b.minX-0.55&&dv.x<b.maxX+0.55&&dv.z>b.minZ-0.55&&dv.z<b.maxZ+0.55&&dv.y>b.minY&&dv.y<b.top+0.3&&p.y<b.top){vel.y=Math.max(vel.y,3.4);break;}
+      }
+    }
+  }
+}
+const hudEl=document.getElementById('hud'),crossEl=document.getElementById('cross');
+function domHud(){
+  const on=!VR()&&ui.style.display==='none';
+  hudEl.style.display=crossEl.style.display=on?'block':'none';
+  if(!on)return;
+  const mp=typeof MP!=='undefined'&&MP.on;
+  let t=(mode==='casual'?'Casual':'Infection')+'  |  '+({forest:'Forest',cave:'Caves',city:'City'})[curMap]+'\n';
+  if(mode==='infection')t+=(mp&&MP.infected?'YOU ARE INFECTED':'Time '+time.toFixed(1)+'s   Best '+best.toFixed(1)+'s')+'\n';
+  if(mp)t+='Room '+MP.code+' - '+(MP.n+1)+' players\n';
+  t+=cool>0?'Fart: recharging':'Fart: READY';
+  t+='\nWASD move   Space jump / climb   F, Shift or click: fart';
+  if(document.pointerLockElement!==renderer.domElement)t+='\n(click the game to lock your mouse)';
+  hudEl.textContent=t;
+}
+
 const clock=new THREE.Clock();
 renderer.setAnimationLoop(()=>{
   const dt=Math.min(clock.getDelta(),0.05);
@@ -446,9 +570,10 @@ renderer.setAnimationLoop(()=>{
   if(pressed&&!prevBtn)fart();
   prevBtn=pressed;
 
+  desktopUpdate(dt);
   // hand locomotion
   const move=new THREE.Vector3();let n=0;
-  for(const h of hands){
+  for(const h of (VR()?hands:[])){
     // extended "gorilla arms": hand reach is scaled out from the head
     const lp=camera.position.clone().add(h.c.position.clone().sub(camera.position).multiplyScalar(REACH));
     h.mesh.position.copy(lp);
@@ -498,10 +623,12 @@ renderer.setAnimationLoop(()=>{
       else{rig.position.z+=amt;head.z+=amt;vel.z=Math.max(vel.z,0);}
     }
   }
-  if(!inCave&&Math.abs(head.x-HOLE.x)<HOLE.hs*0.85&&Math.abs(head.z-HOLE.z)<HOLE.hs*0.85&&rig.position.y>HOLE.y-4){
-    if(rig.position.y<HOLE.y-1.5)tp(true);
+  if(curMap==='forest'&&Math.abs(head.x-HOLE.x)<HOLE.hs*0.85&&Math.abs(head.z-HOLE.z)<HOLE.hs*0.85&&rig.position.y>HOLE.y-4){
+    if(rig.position.y<HOLE.y-1.5)tp('cave');
   }else if(rig.position.y<floorY){rig.position.y=floorY;if(vel.y<0)vel.y=0;vel.x*=0.9;vel.z*=0.9;}
-  if(inCave&&Math.hypot(head.x-PORTAL.x,head.z-PORTAL.z)<1.3)tp(false);
+  if(curMap==='cave'&&Math.hypot(head.x-PORTAL.x,head.z-PORTAL.z)<1.3)tp('forest');
+  else if(curMap==='forest'&&rig.position.y<1&&Math.hypot(head.x-FP.x,head.z-FP.z)<1.3)tp('city');
+  else if(curMap==='city'&&Math.hypot(head.x-CITY_EXIT.x,head.z-CITY_EXIT.z)<1.3)tp('forest');
   if(Math.abs(rig.position.x)>30){rig.position.x=Math.sign(rig.position.x)*30;vel.x=0;}
   if(Math.abs(rig.position.z)>30){rig.position.z=Math.sign(rig.position.z)*30;vel.z=0;}
 
@@ -509,7 +636,7 @@ renderer.setAnimationLoop(()=>{
   camera.getWorldPosition(head);
   const speed=3+Math.min(time*0.05,2.5);
   for(const b of bots){
-    b.mesh.visible=(b.map==='cave')===inCave;
+    b.mesh.visible=b.map===curMap;
     if(!b.mesh.visible)continue;
     const m=b.mesh.position;
     tmp.set(head.x-m.x,0,head.z-m.z);
@@ -531,7 +658,7 @@ renderer.setAnimationLoop(()=>{
     if(p.life<=0){scene.remove(p.m);p.m.material.dispose();puffs.splice(i,1);}
   }
 
-  mpUpdate(dt);hudT-=dt;if(hudT<=0){drawHud();hudT=0.2;}
+  mpUpdate(dt);hudT-=dt;if(hudT<=0){drawHud();domHud();hudT=0.2;}
   renderer.render(scene,camera);
 });
 
@@ -542,10 +669,10 @@ const ui=document.getElementById('ui'),msg=document.getElementById('msg');
 async function start(m){
   ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();
   const code=document.getElementById('room').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if(!navigator.xr){msg.textContent='WebXR not available. Open this page in the Meta Quest Browser.';return;}
+  const pc=document.getElementById('pc').checked;
   let s=null;
   try{
-    const ok=await navigator.xr.isSessionSupported('immersive-vr');
+    const ok=!pc&&!!navigator.xr&&await navigator.xr.isSessionSupported('immersive-vr');
     if(ok){
       s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
       s.addEventListener('end',()=>{ui.style.display='flex';mpLeave();});
@@ -558,9 +685,13 @@ async function start(m){
     }
     setMode(use);
     ui.style.display='none';
+    if(!ok)renderer.domElement.requestPointerLock();
   }catch(e){msg.textContent='Could not start VR: '+e.message;}
 }
 document.getElementById('rand').onclick=()=>{document.getElementById('room').value=Math.random().toString(36).slice(2,6).toUpperCase();};
+const pcBox=document.getElementById('pc');
+if(navigator.xr&&navigator.xr.isSessionSupported)navigator.xr.isSessionSupported('immersive-vr').then(ok=>{pcBox.checked=!ok;}).catch(()=>{pcBox.checked=true;});
+else pcBox.checked=true;
 document.getElementById('casual').onclick=()=>start('casual');
 document.getElementById('infection').onclick=()=>start('infection');
 </script>
