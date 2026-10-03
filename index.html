@@ -12,6 +12,8 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:
 #ui{background:var(--bg);overflow:auto;position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;z-index:2}
 h1{font-size:clamp(34px,9vw,72px);margin:0 0 8px;color:var(--ac)}
 p{max-width:520px;line-height:1.5;margin:6px 0}
+input{font-size:20px;padding:12px;border-radius:12px;border:2px solid var(--ac);background:transparent;color:var(--fg);text-align:center;text-transform:uppercase;width:160px}
+button.sm{font-size:16px;padding:10px 16px;margin-top:0}
 button.inf{background:#e24b4b;color:#fff}
 .row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
 button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:14px;background:var(--ac);color:#102000;font-weight:700;cursor:pointer}
@@ -23,10 +25,15 @@ button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:1
   <p>Swing your arms and push off the ground, walls and trees to move. Press <b>A / B / X / Y</b> to rip a fart boost in the direction you're looking.</p>
   <p><b>Casual:</b> chill out with colorful gorillas that just wander around.<br><b>Infection:</b> red gorillas hunt you down. Survive as long as you can!</p>
   <p>Climb the staircase up the giant tree, check out the computer, then drop into the hole to explore the caves. Walk into the glowing portal to climb back out. The caves have gorillas too, so watch out!</p>
+  <p>Friends: type the same <b>room code</b> to play together. Leave it blank to play solo.</p>
+  <div class="row" style="margin-top:6px"><input id="room" maxlength="4" placeholder="ROOM CODE"><button id="rand" class="sm">Random</button></div>
   <div class="row"><button id="casual">Casual</button><button id="infection" class="inf">Infection</button></div>
   <p id="msg" style="opacity:.8"></p>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -224,6 +231,7 @@ function setMode(m){
     const n=MAPS[k][m];
     for(let i=0;i<n;i++)bots.push({map:k,mesh:makeGorilla(m==='infection'?0xcc2222:cols[ci++%6]),tx:0,tz:0,wt:0});
   }
+  if(MP.on&&m==='infection'){bots.forEach(b=>scene.remove(b.mesh));bots.length=0;}
   resetBots();time=0;vel.set(0,0,0);rig.position.set(SPAWN.x,SPAWN.y,SPAWN.z);
 }
 
@@ -251,6 +259,8 @@ function drawHud(){
   else{x.fillText('Time '+time.toFixed(1)+'s',14,36);x.fillText('Best '+best.toFixed(1)+'s',14,72);}
   x.fillStyle='#333';x.fillRect(14,92,228,18);
   x.fillStyle=cool>0?'#e8a020':'#8bd22a';x.fillRect(14,92,228*(1-Math.max(cool,0)/COOL),18);
+  x.font='15px sans-serif';x.fillStyle='#bff25a';
+  if(MP.on)x.fillText('Room '+MP.code+' - '+(MP.n+1)+' players'+(MP.infected?' - INFECTED':''),14,124);
   htex.needsUpdate=true;
 }
 
@@ -301,7 +311,7 @@ function fart(){
   tmp.copy(fwd);tmp.y+=0.35;tmp.normalize();
   vel.addScaledVector(tmp,7);
   if(vel.length()>13)vel.setLength(13);
-  boostT=0.25;cool=COOL;
+  boostT=0.25;cool=COOL;fartCount++;
   spawnPuffs(head.clone().add(new THREE.Vector3(0,-0.5,0)).addScaledVector(fwd,-0.2),fwd);
   fartSound();
   hands.forEach(h=>buzz(h,0.8,120));
@@ -314,6 +324,115 @@ function tagged(){
   if(inCave)tp(false);
   best=Math.max(best,time);time=0;vel.set(0,0,0);
   rig.position.set(SPAWN.x,SPAWN.y,SPAWN.z);resetBots();
+}
+
+// ===== multiplayer (Firebase Realtime Database) =====
+const FIREBASE_CONFIG={
+  apiKey:"AIzaSyASHnqIL0kTE7hnfnwTNYMJBSIqwXvUZlI",
+  authDomain:"gorilla-fart-vr.firebaseapp.com",
+  databaseURL:"https://gorilla-fart-vr-default-rtdb.firebaseio.com",
+  projectId:"gorilla-fart-vr",
+  storageBucket:"gorilla-fart-vr.firebasestorage.app",
+  messagingSenderId:"934560681387",
+  appId:"1:934560681387:web:0432beb1233ee48f0216ee"
+};
+const MP={on:false,code:'',id:null,mode:'casual',infected:false,n:0,remotes:{},off:0};
+let db=null,fartCount=0,mpT=0,mpS=0;
+const mh=new THREE.Vector3(),mf=new THREE.Vector3();
+const AV_COLS=[0x3b82f6,0xf5c518,0xa855f7,0x22c55e,0xff8c1a,0x14b8a6];
+function makeAvatar(id){
+  let hsh=0;for(const ch of id)hsh+=ch.charCodeAt(0);
+  const base=AV_COLS[hsh%6],mat=new THREE.MeshLambertMaterial({color:base});
+  const g=new THREE.Group();
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.3,0.32),mat);
+  const body=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.7,0.35),mat);
+  const l=new THREE.Mesh(new THREE.SphereGeometry(0.09,10,8),mat);
+  const r=new THREE.Mesh(new THREE.SphereGeometry(0.09,10,8),mat);
+  g.add(head,body,l,r);scene.add(g);
+  return {g,head,body,l,r,mat,base,f:0,inf:false,init:false,seen:Date.now(),tagged:0};
+}
+function remoteFart(r){
+  spawnPuffs(r.head.position.clone().add(new THREE.Vector3(0,-0.5,0)),new THREE.Vector3(0,0,1));
+  fartSound();
+}
+function mpReady(){return typeof firebase!=='undefined'&&FIREBASE_CONFIG.apiKey!=='YOUR_API_KEY';}
+async function mpJoin(code,m){
+  if(!mpReady())throw new Error('Multiplayer not set up yet: add your Firebase config to the file.');
+  if(!firebase.apps.length)firebase.initializeApp(FIREBASE_CONFIG);
+  const cred=await firebase.auth().signInAnonymously();
+  MP.id=cred.user.uid;db=firebase.database();
+  MP.off=(await db.ref('.info/serverTimeOffset').once('value')).val()||0;
+  const base=db.ref('rooms/'+code);
+  const snap=await base.child('players').once('value');
+  const now=Date.now()+MP.off,others=[];
+  snap.forEach(c=>{const v=c.val();if(c.key!==MP.id&&v&&now-v.ts<6000)others.push({id:c.key,inf:v.inf});});
+  if(others.length>=10)throw new Error('That room is full (10 players).');
+  let rm=m;
+  if(others.length){rm=(await base.child('mode').once('value')).val()||m;}
+  else await base.child('mode').set(m);
+  MP.on=true;MP.code=code;MP.mode=rm;
+  MP.infected=rm==='infection'&&!others.some(o=>o.inf);
+  MP.ref=base.child('players/'+MP.id);MP.ref.onDisconnect().remove();
+  MP.tagRef=base.child('tags/'+MP.id);MP.tagRef.remove();
+  MP.tagRef.on('value',sn=>{if(sn.exists()&&MP.mode==='infection'&&!MP.infected){MP.infected=true;MP.tagRef.remove();}});
+  MP.players=base.child('players');
+  MP.players.on('value',sn=>{
+    sn.forEach(c=>{
+      if(c.key===MP.id)return;const v=c.val();if(!v)return;
+      let r=MP.remotes[c.key];
+      if(!r){r=MP.remotes[c.key]=makeAvatar(c.key);r.f=v.f||0;}
+      r.t=v;r.inf=!!v.inf;r.seen=Date.now();
+      if((v.f||0)!==r.f){r.f=v.f||0;remoteFart(r);}
+    });
+  });
+  return rm;
+}
+function mpLeave(){
+  if(!MP.on)return;
+  MP.on=false;
+  try{MP.players.off();MP.tagRef.off();MP.ref.remove();}catch(e){}
+  for(const k in MP.remotes){scene.remove(MP.remotes[k].g);}
+  MP.remotes={};MP.infected=false;MP.n=0;
+}
+function mpUpdate(dt){
+  if(!MP.on)return;
+  const nowL=Date.now();
+  mpT+=dt;mpS+=dt;
+  if(mpT>=0.1){
+    mpT=0;
+    camera.getWorldPosition(mh);camera.getWorldDirection(mf);
+    const q=v=>Math.round(v*100)/100,hw=h=>h.world?[q(h.world.x),q(h.world.y),q(h.world.z)]:[0,0,0];
+    MP.ref.set({ts:Date.now()+MP.off,h:[q(mh.x),q(mh.y),q(mh.z),q(Math.atan2(mf.x,mf.z))],l:hw(hands[0]),r:hw(hands[1]),f:fartCount,inf:MP.infected?1:0});
+    hands.forEach((h,i)=>h.mesh.material.color.set(MP.infected?0xcc2222:(i?0x333333:0x555555)));
+  }
+  const a=Math.min(1,dt*15);
+  for(const k in MP.remotes){
+    const r=MP.remotes[k];
+    if(nowL-r.seen>6000){scene.remove(r.g);delete MP.remotes[k];continue;}
+    const t=r.t;if(!t||!t.h||!t.l||!t.r)continue;
+    const set=(m,v,off)=>{mh.set(v[0],v[1]+(off||0),v[2]);if(!r.init)m.position.copy(mh);else m.position.lerp(mh,a);};
+    set(r.head,t.h);set(r.body,t.h,-0.55);set(r.l,t.l);set(r.r,t.r);
+    r.init=true;r.head.rotation.y=r.body.rotation.y=t.h[3];
+    r.mat.color.set(r.inf?0xcc2222:r.base);
+  }
+  MP.n=Object.keys(MP.remotes).length;
+  if(MP.mode==='infection'){
+    if(MP.infected){
+      camera.getWorldPosition(mh);
+      for(const k in MP.remotes){
+        const r=MP.remotes[k];if(r.inf||r.tagged>nowL||!r.init)continue;
+        let hd=9;hands.forEach(h=>{if(h.world)hd=Math.min(hd,h.world.distanceTo(r.head.position));});
+        if(r.head.position.distanceTo(mh)<0.9||hd<0.5){
+          r.inf=true;r.tagged=nowL+2000;
+          db.ref('rooms/'+MP.code+'/tags/'+k).set(nowL);
+        }
+      }
+    }else if(mpS>=1){
+      mpS=0;
+      const ks=Object.keys(MP.remotes);
+      if(ks.length&&!ks.some(k=>MP.remotes[k].inf)&&ks.every(k=>MP.id<k))MP.infected=true;
+    }
+  }
 }
 
 const clock=new THREE.Clock();
@@ -334,6 +453,7 @@ renderer.setAnimationLoop(()=>{
     const lp=camera.position.clone().add(h.c.position.clone().sub(camera.position).multiplyScalar(REACH));
     h.mesh.position.copy(lp);
     tmp.copy(lp).add(rig.position);tmp.y-=DROP;
+    h.world=(h.world||new THREE.Vector3()).copy(tmp);
     let touch=tmp.y<floorY+0.07;
     if(!touch)for(const b of boxes){if(inBox(tmp,b,0.07)){touch=true;break;}}
     if(touch&&h.last){
@@ -411,7 +531,7 @@ renderer.setAnimationLoop(()=>{
     if(p.life<=0){scene.remove(p.m);p.m.material.dispose();puffs.splice(i,1);}
   }
 
-  hudT-=dt;if(hudT<=0){drawHud();hudT=0.2;}
+  mpUpdate(dt);hudT-=dt;if(hudT<=0){drawHud();hudT=0.2;}
   renderer.render(scene,camera);
 });
 
@@ -419,18 +539,28 @@ addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updat
 
 // enter VR
 const ui=document.getElementById('ui'),msg=document.getElementById('msg');
-async function start(m){setMode(m);
+async function start(m){
   ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();
-  if(!navigator.xr){msg.textContent='WebXR not available. Open this link in the Meta Quest Browser.';return;}
+  const code=document.getElementById('room').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!navigator.xr){msg.textContent='WebXR not available. Open this page in the Meta Quest Browser.';return;}
+  let s=null;
   try{
     const ok=await navigator.xr.isSessionSupported('immersive-vr');
-    if(!ok){msg.textContent='Immersive VR not supported here. Use the Quest Browser (Space bar farts on desktop).';ui.style.display='none';return;}
-    const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
-    s.addEventListener('end',()=>{ui.style.display='flex';});
-    await renderer.xr.setSession(s);
+    if(ok){
+      s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
+      s.addEventListener('end',()=>{ui.style.display='flex';mpLeave();});
+      await renderer.xr.setSession(s);
+    }
+    let use=m;
+    if(code){
+      try{use=await mpJoin(code,m);}
+      catch(err){msg.textContent=err.message;if(s)s.end();return;}
+    }
+    setMode(use);
     ui.style.display='none';
   }catch(e){msg.textContent='Could not start VR: '+e.message;}
 }
+document.getElementById('rand').onclick=()=>{document.getElementById('room').value=Math.random().toString(36).slice(2,6).toUpperCase();};
 document.getElementById('casual').onclick=()=>start('casual');
 document.getElementById('infection').onclick=()=>start('infection');
 </script>
