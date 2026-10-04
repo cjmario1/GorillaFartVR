@@ -28,8 +28,8 @@ button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:1
   <p><b>On a computer:</b> WASD to move, Space to jump (hold it against walls and trees to climb), and F, Shift or click to fart.</p>
   <p><b>Casual:</b> chill out with colorful gorillas that just wander around.<br><b>Infection:</b> red gorillas hunt you down. Survive as long as you can!</p>
   <p>Climb the staircase up the giant tree, check out the computer, then drop into the hole to explore the caves. Walk into the glowing portal to climb back out. The caves have gorillas too, so watch out! A glowing orange portal out in the forest leads to the city.</p>
-  <p>Friends: type the same <b>room code</b> to play together. Leave it blank to play solo.</p>
-  <div class="row" style="margin-top:6px"><input id="room" maxlength="4" placeholder="ROOM CODE"><button id="rand" class="sm">Random</button></div>
+  <p>Friends: type the same <b>room code</b> to play together. Leave it blank to play solo. Tap <b>Enable mic</b> first if you want voice chat (you can still listen without it).</p>
+  <div class="row" style="margin-top:6px"><input id="room" maxlength="4" placeholder="ROOM CODE"><button id="rand" class="sm">Random</button><button id="micbtn" class="sm">Enable mic</button></div>
   <label style="margin-top:12px;cursor:pointer"><input type="checkbox" id="pc"> Play on computer (keyboard &amp; mouse)</label>
   <div class="row"><button id="casual">Casual</button><button id="infection" class="inf">Infection</button></div>
   <p id="msg" style="opacity:.8"></p>
@@ -68,6 +68,85 @@ const CITY_Y=-100,FP={x:-20,z:-16},CITY_SPAWN={x:10,z:10},CITY_EXIT={x:-10,z:-10
 const MAPS={forest:{floor:0,casual:6,infection:3},cave:{floor:CY,casual:5,infection:3},city:{floor:CITY_Y,casual:5,infection:3}};
 const ENV={forest:{bg:0x9bd36a,fog:[15,60],hemi:1.1,sun:0.6},cave:{bg:0x07070d,fog:[6,32],hemi:0.5,sun:0.05},city:{bg:0x8ec5ff,fog:[28,62],hemi:1.0,sun:0.7}};
 let curMap='forest',floorY=0;
+
+// ===== player name + computer keyboard =====
+function loadName(){
+  try{const n=localStorage.getItem('gfName');if(n)return n;}catch(e){}
+  const d='farter'+(1000+Math.floor(Math.random()*9000));
+  try{localStorage.setItem('gfName',d);}catch(e){}
+  return d;
+}
+function saveName(){try{localStorage.setItem('gfName',myName);}catch(e){}}
+let myName=loadName(),typing=false;
+const COMP={keys:[]};
+function drawScreen(){
+  if(!COMP.sc)return;
+  const g=COMP.sc.getContext('2d');
+  g.fillStyle='#06240f';g.fillRect(0,0,256,160);
+  g.fillStyle='#7dff7d';g.font='bold 18px monospace';g.fillText('GORILLA COMPUTER',14,28);
+  g.font='14px monospace';g.fillText('YOUR NAME:',14,62);
+  g.font='bold 28px monospace';g.fillText(myName+(typing?'_':''),14,100);
+  g.font='13px monospace';g.fillText(typing?'Enter = done':'Poke keys (VR) / E (PC)',14,140);
+  COMP.stex.needsUpdate=true;
+}
+function drawKeys(hi){
+  const g=COMP.kc.getContext('2d');
+  g.fillStyle='#10202a';g.fillRect(0,0,512,354);
+  g.textAlign='center';g.font='bold 21px sans-serif';
+  COMP.keys.forEach((q,i)=>{
+    g.fillStyle=i===hi?'#8bd22a':'#2f4a5c';g.fillRect(q.x,q.y,q.w,q.h);
+    g.fillStyle=i===hi?'#102000':'#eaffc8';g.fillText(q.l,q.x+q.w/2,q.y+q.h/2+8);
+  });
+  g.textAlign='left';
+  COMP.ktex.needsUpdate=true;
+}
+function initComputer(cx,cz,H){
+  COMP.sc=document.createElement('canvas');COMP.sc.width=256;COMP.sc.height=160;
+  COMP.stex=new THREE.CanvasTexture(COMP.sc);
+  const scr=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.56),new THREE.MeshBasicMaterial({map:COMP.stex}));
+  scr.position.set(cx,H+1.225,cz-0.09);scene.add(scr);
+  COMP.kc=document.createElement('canvas');COMP.kc.width=512;COMP.kc.height=354;
+  COMP.ktex=new THREE.CanvasTexture(COMP.kc);
+  COMP.pw=2.2;COMP.ph=2.2*354/512;COMP.px=cx+1.9;COMP.py=H+1.4;COMP.pz=cz-0.09;
+  const kp=new THREE.Mesh(new THREE.PlaneGeometry(COMP.pw,COMP.ph),new THREE.MeshBasicMaterial({map:COMP.ktex}));
+  kp.position.set(COMP.px,COMP.py,COMP.pz);scene.add(kp);
+  ['1234567890','QWERTYUIOP','ASDFGHJKL-','ZXCVBNM_'].forEach((row,ri)=>{
+    [...row].forEach((ch,ci)=>COMP.keys.push({l:ch,x:16+ci*48,y:16+ri*54,w:44,h:48}));
+  });
+  COMP.keys.push({l:'DEL',x:16,y:232,w:150,h:48},{l:'CLEAR',x:176,y:232,w:150,h:48},{l:'RESET',x:336,y:232,w:160,h:48},
+    {l:'NO MIC',id:'mic',x:16,y:286,w:150,h:48},{l:'MUTE NEAR',x:176,y:286,w:170,h:48},{l:'UNMUTE ALL',x:356,y:286,w:140,h:48});
+  drawScreen();drawKeys(-1);
+}
+function pressKey(q,i){
+  if(q.l==='DEL')myName=myName.slice(0,-1);
+  else if(q.l==='CLEAR')myName='';
+  else if(q.l==='RESET')myName='farter'+(1000+Math.floor(Math.random()*9000));
+  else if(q.id==='mic')toggleMic();
+  else if(q.l==='MUTE NEAR')muteNearest();
+  else if(q.l==='UNMUTE ALL')Object.values(MP.remotes).forEach(r=>{r.muted=false;r.nk='';});
+  else if(myName.length<12)myName+=q.l;
+  saveName();drawScreen();drawKeys(i);
+  setTimeout(()=>drawKeys(-1),150);
+}
+function kbUpdate(dt){
+  if(!VR()||curMap!=='forest'||!COMP.keys.length)return;
+  for(const h of hands){
+    if(!h.world||!h.gp)continue;
+    h.kc=(h.kc||0)-dt;
+    const w=h.world;let k=-1;
+    if(Math.abs(w.z-COMP.pz)<0.1&&Math.abs(w.x-COMP.px)<COMP.pw/2&&Math.abs(w.y-COMP.py)<COMP.ph/2){
+      const u=(w.x-(COMP.px-COMP.pw/2))/COMP.pw*512,v=(COMP.py+COMP.ph/2-w.y)/COMP.ph*354;
+      k=COMP.keys.findIndex(q=>u>=q.x&&u<=q.x+q.w&&v>=q.y&&v<=q.y+q.h);
+    }
+    if(k<0){h.kk=-1;continue;}
+    if(k!==h.kk&&h.kc<=0){h.kk=k;h.kc=0.2;pressKey(COMP.keys[k],k);buzz(h,0.6,40);}
+  }
+}
+function nearComputer(){
+  camera.getWorldPosition(dv);
+  return curMap==='forest'&&Math.abs(dv.y-(TH+0.95))<2&&Math.hypot(dv.x+2.5,dv.z+12.5)<3.2;
+}
+
 let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
 function addBox(x,z,w,h,d,color,y0=0){
   const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color}));
@@ -153,14 +232,7 @@ for(let i=0;i<12;i++){
   const cz=-12.5,cxp=-2.5;
   addBox(cxp,cz,1.1,0.9,0.5,0x3a3a40,H);
   addBox(cxp,cz-0.15,1.0,0.65,0.1,0x1a1a1f,H+0.9);
-  const cv=document.createElement('canvas');cv.width=256;cv.height=160;
-  const cx=cv.getContext('2d');
-  cx.fillStyle='#06240f';cx.fillRect(0,0,256,160);
-  cx.fillStyle='#7dff7d';cx.font='bold 24px monospace';
-  cx.fillText('GORILLA',20,60);cx.fillText('COMPUTER',20,92);
-  cx.font='18px monospace';cx.fillText('coming soon...',20,128);
-  const scr=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.56),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv)}));
-  scr.position.set(cxp,H+1.225,cz-0.09);scene.add(scr);
+  initComputer(cxp,cz,H);
   // canopy high above the deck
   for(let k=0;k<7;k++){
     const m=new THREE.Mesh(new THREE.SphereGeometry(3+Math.random()*2,10,8),lm(k%2?0x2f8a2f:0x3c9a3a));
@@ -338,16 +410,18 @@ function buzz(h,i,ms){
 
 // audio
 let ac=null;
-function fartSound(){
-  if(!ac)return;const t=ac.currentTime;
+function fartSound(vol=1,pan=0){
+  if(!ac||vol<0.01)return;const t=ac.currentTime;
   const o=ac.createOscillator(),g=ac.createGain(),l=ac.createOscillator(),lg=ac.createGain();
   o.type='sawtooth';
   o.frequency.setValueAtTime(120+Math.random()*50,t);
   o.frequency.exponentialRampToValueAtTime(40,t+0.5);
   l.frequency.value=40+Math.random()*20;lg.gain.value=30;
   l.connect(lg);lg.connect(o.frequency);
-  g.gain.setValueAtTime(0.5,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.55);
-  o.connect(g);g.connect(ac.destination);
+  g.gain.setValueAtTime(0.5*vol,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.55);
+  o.connect(g);
+  if(ac.createStereoPanner){const pn=ac.createStereoPanner();pn.pan.value=pan;g.connect(pn);pn.connect(ac.destination);}
+  else g.connect(ac.destination);
   o.start(t);l.start(t);o.stop(t+0.6);l.stop(t+0.6);
 }
 
@@ -400,7 +474,8 @@ const FIREBASE_CONFIG={
 };
 const MP={on:false,code:'',id:null,mode:'casual',infected:false,n:0,remotes:{},off:0};
 let db=null,fartCount=0,mpT=0,mpS=0;
-const mh=new THREE.Vector3(),mf=new THREE.Vector3();
+const mh=new THREE.Vector3(),mf=new THREE.Vector3(),vl=new THREE.Vector3(),vf=new THREE.Vector3();
+let micStream=null,micOn=true;
 const AV_COLS=[0x3b82f6,0xf5c518,0xa855f7,0x22c55e,0xff8c1a,0x14b8a6];
 function makeAvatar(id){
   let hsh=0;for(const ch of id)hsh+=ch.charCodeAt(0);
@@ -411,11 +486,95 @@ function makeAvatar(id){
   const l=new THREE.Mesh(new THREE.SphereGeometry(0.09,10,8),mat);
   const r=new THREE.Mesh(new THREE.SphereGeometry(0.09,10,8),mat);
   g.add(head,body,l,r);scene.add(g);
-  return {g,head,body,l,r,mat,base,f:0,inf:false,init:false,seen:Date.now(),tagged:0};
+  const tagCanvas=document.createElement('canvas');tagCanvas.width=256;tagCanvas.height=64;
+  const tagTex=new THREE.CanvasTexture(tagCanvas);
+  const tag=new THREE.Sprite(new THREE.SpriteMaterial({map:tagTex,transparent:true}));
+  tag.scale.set(1.6,0.4,1);g.add(tag);
+  return {g,head,body,l,r,mat,base,tag,tagCanvas,tagTex,nk:'',f:0,inf:false,init:false,seen:Date.now(),tagged:0};
 }
 function remoteFart(r){
-  spawnPuffs(r.head.position.clone().add(new THREE.Vector3(0,-0.5,0)),new THREE.Vector3(0,0,1));
-  fartSound();
+  const p=r.t&&r.t.h?new THREE.Vector3(r.t.h[0],r.t.h[1],r.t.h[2]):r.head.position.clone();
+  spawnPuffs(p.clone().add(new THREE.Vector3(0,-0.5,0)),new THREE.Vector3(0,0,1));
+  // volume falls off with distance; pan follows where the player is
+  camera.getWorldPosition(mh);camera.getWorldDirection(mf);
+  const d=p.distanceTo(mh),vol=Math.pow(Math.max(0,1-d/35),2);
+  const rx=mf.z,rz=-mf.x,rl=Math.hypot(rx,rz)||1,dx=p.x-mh.x,dz=p.z-mh.z,dl=Math.hypot(dx,dz)||1;
+  const pan=Math.max(-1,Math.min(1,(dx*rx+dz*rz)/(dl*rl)));
+  fartSound(vol,pan);
+}
+
+// ===== voice chat (WebRTC, signaled through Firebase) =====
+const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+const peers={};
+function setMicLabel(){
+  const k=COMP.keys.find(q=>q.id==='mic');
+  if(k)k.l=micStream?(micOn?'MIC ON':'MIC OFF'):'NO MIC';
+  drawKeys(-1);
+}
+function toggleMic(){
+  if(!micStream)return;
+  micOn=!micOn;micStream.getAudioTracks().forEach(t=>{t.enabled=micOn;});setMicLabel();
+}
+function muteNearest(){
+  camera.getWorldPosition(vl);let best=null,bd=6;
+  for(const k in MP.remotes){const r=MP.remotes[k];if(!r.init)continue;const d=r.head.position.distanceTo(vl);if(d<bd){bd=d;best=r;}}
+  if(best){best.muted=!best.muted;best.nk='';}
+}
+function spatial(pos,range){
+  const d=pos.distanceTo(vl);
+  const rx=vf.z,rz=-vf.x,rl=Math.hypot(rx,rz)||1,dx=pos.x-vl.x,dz=pos.z-vl.z,dl=Math.hypot(dx,dz)||1;
+  return {vol:Math.pow(Math.max(0,1-d/range),1.5)*1.4,pan:Math.max(-1,Math.min(1,(dx*rx+dz*rz)/(dl*rl)))};
+}
+function sigSend(to,type,data){db.ref('rooms/'+MP.code+'/sig/'+to).push({f:MP.id,t:type,d:JSON.stringify(data)});}
+function voiceClose(id){
+  const p=peers[id];if(!p)return;
+  try{p.pc.close();if(p.gn)p.gn.disconnect();if(p.pn)p.pn.disconnect();if(p.a)p.a.srcObject=null;}catch(e){}
+  delete peers[id];
+}
+function voicePeer(id){
+  voiceClose(id);
+  const pc=new RTCPeerConnection(ICE),p={pc,ice:[],ready:false};peers[id]=p;
+  pc.onicecandidate=e=>{if(e.candidate)sigSend(id,'ice',e.candidate.toJSON());};
+  pc.ontrack=e=>{
+    if(p.gn||!e.streams[0])return;
+    const st=e.streams[0],ms=ac.createMediaStreamSource(st);
+    p.gn=ac.createGain();p.gn.gain.value=0;ms.connect(p.gn);
+    if(ac.createStereoPanner){p.pn=ac.createStereoPanner();p.gn.connect(p.pn);p.pn.connect(ac.destination);}
+    else p.gn.connect(ac.destination);
+    p.a=new Audio();p.a.srcObject=st;p.a.muted=true;p.a.play().catch(()=>{});
+  };
+  if(micStream)micStream.getAudioTracks().forEach(t=>pc.addTrack(t,micStream));
+  return p;
+}
+async function voiceOffer(id){
+  try{
+    const p=voicePeer(id);
+    if(!micStream)p.pc.addTransceiver('audio',{direction:'recvonly'});
+    await p.pc.setLocalDescription(await p.pc.createOffer());
+    sigSend(id,'offer',p.pc.localDescription);
+  }catch(e){}
+}
+async function voiceSignal(m){
+  const id=m.f,d=JSON.parse(m.d);
+  try{
+    if(m.t==='offer'){
+      const p=voicePeer(id);
+      await p.pc.setRemoteDescription(d);p.ready=true;
+      for(const c of p.ice)await p.pc.addIceCandidate(c);
+      p.ice=[];
+      await p.pc.setLocalDescription(await p.pc.createAnswer());
+      sigSend(id,'answer',p.pc.localDescription);
+    }else{
+      const p=peers[id];if(!p)return;
+      if(m.t==='answer'){
+        await p.pc.setRemoteDescription(d);p.ready=true;
+        for(const c of p.ice)await p.pc.addIceCandidate(c);
+        p.ice=[];
+      }else if(m.t==='ice'){
+        if(p.ready)await p.pc.addIceCandidate(d);else p.ice.push(d);
+      }
+    }
+  }catch(e){}
 }
 function mpReady(){return typeof firebase!=='undefined'&&FIREBASE_CONFIG.apiKey!=='YOUR_API_KEY';}
 async function mpJoin(code,m){
@@ -437,12 +596,14 @@ async function mpJoin(code,m){
   MP.ref=base.child('players/'+MP.id);MP.ref.onDisconnect().remove();
   MP.tagRef=base.child('tags/'+MP.id);MP.tagRef.remove();
   MP.tagRef.on('value',sn=>{if(sn.exists()&&MP.mode==='infection'&&!MP.infected){MP.infected=true;MP.tagRef.remove();}});
+  MP.sig=base.child('sig/'+MP.id);MP.sig.remove();
+  MP.sig.on('child_added',sn=>{const m=sn.val();sn.ref.remove();if(m)voiceSignal(m);});
   MP.players=base.child('players');
   MP.players.on('value',sn=>{
     sn.forEach(c=>{
       if(c.key===MP.id)return;const v=c.val();if(!v)return;
       let r=MP.remotes[c.key];
-      if(!r){r=MP.remotes[c.key]=makeAvatar(c.key);r.f=v.f||0;}
+      if(!r){r=MP.remotes[c.key]=makeAvatar(c.key);r.f=v.f||0;if(MP.id<c.key)voiceOffer(c.key);}
       r.t=v;r.inf=!!v.inf;r.seen=Date.now();
       if((v.f||0)!==r.f){r.f=v.f||0;remoteFart(r);}
     });
@@ -452,7 +613,8 @@ async function mpJoin(code,m){
 function mpLeave(){
   if(!MP.on)return;
   MP.on=false;
-  try{MP.players.off();MP.tagRef.off();MP.ref.remove();}catch(e){}
+  try{MP.players.off();MP.tagRef.off();MP.sig.off();MP.ref.remove();}catch(e){}
+  for(const k in peers)voiceClose(k);
   for(const k in MP.remotes){scene.remove(MP.remotes[k].g);}
   MP.remotes={};MP.infected=false;MP.n=0;
 }
@@ -465,18 +627,33 @@ function mpUpdate(dt){
     camera.getWorldPosition(mh);camera.getWorldDirection(mf);
     const q=v=>Math.round(v*100)/100,yw=Math.atan2(mf.x,mf.z);
     const hw=(h,sd)=>VR()&&h.world?[q(h.world.x),q(h.world.y),q(h.world.z)]:[q(mh.x+Math.cos(yw)*sd*0.35+Math.sin(yw)*0.2),q(mh.y-0.6),q(mh.z-Math.sin(yw)*sd*0.35+Math.cos(yw)*0.2)];
-    MP.ref.set({ts:Date.now()+MP.off,h:[q(mh.x),q(mh.y),q(mh.z),q(yw)],l:hw(hands[0],-1),r:hw(hands[1],1),f:fartCount,inf:MP.infected?1:0});
+    MP.ref.set({ts:Date.now()+MP.off,h:[q(mh.x),q(mh.y),q(mh.z),q(yw)],l:hw(hands[0],-1),r:hw(hands[1],1),f:fartCount,n:myName,inf:MP.infected?1:0});
     hands.forEach((h,i)=>h.mesh.material.color.set(MP.infected?0xcc2222:(i?0x333333:0x555555)));
   }
   const a=Math.min(1,dt*15);
+  camera.getWorldPosition(vl);camera.getWorldDirection(vf);
   for(const k in MP.remotes){
     const r=MP.remotes[k];
-    if(nowL-r.seen>6000){scene.remove(r.g);delete MP.remotes[k];continue;}
+    if(nowL-r.seen>6000){scene.remove(r.g);delete MP.remotes[k];voiceClose(k);continue;}
     const t=r.t;if(!t||!t.h||!t.l||!t.r)continue;
     const set=(m,v,off)=>{mh.set(v[0],v[1]+(off||0),v[2]);if(!r.init)m.position.copy(mh);else m.position.lerp(mh,a);};
     set(r.head,t.h);set(r.body,t.h,-0.55);set(r.l,t.l);set(r.r,t.r);
     r.init=true;r.head.rotation.y=r.body.rotation.y=t.h[3];
     r.mat.color.set(r.inf?0xcc2222:r.base);
+    const nm0=String(t.n||'gorilla').slice(0,14),nm=nm0+(r.muted?' (muted)':''),nk=nm+(r.inf?'1':'0');
+    if(nk!==r.nk){
+      r.nk=nk;const tg=r.tagCanvas.getContext('2d');
+      tg.clearRect(0,0,256,64);tg.font='bold 34px sans-serif';tg.textAlign='center';
+      tg.lineWidth=6;tg.strokeStyle='rgba(0,0,0,.85)';tg.strokeText(nm,128,44);
+      tg.fillStyle=r.inf?'#ff7a7a':'#ffffff';tg.fillText(nm,128,44);r.tagTex.needsUpdate=true;
+    }
+    r.tag.position.set(r.head.position.x,r.head.position.y+0.45,r.head.position.z);
+    const pr=peers[k];
+    if(pr&&pr.gn){
+      const sp=spatial(r.head.position,25);
+      pr.gn.gain.setTargetAtTime(r.muted?0:sp.vol,ac.currentTime,0.08);
+      if(pr.pn)pr.pn.pan.setTargetAtTime(sp.pan,ac.currentTime,0.08);
+    }
   }
   MP.n=Object.keys(MP.remotes).length;
   if(MP.mode==='infection'){
@@ -503,6 +680,18 @@ const keys={};let yaw=0,pitch=0;
 const VR=()=>renderer.xr.isPresenting;
 camera.rotation.order='YXZ';
 addEventListener('keydown',e=>{
+  if(!VR()&&typing){
+    e.preventDefault();
+    if(e.key==='Enter'||e.key==='Escape')typing=false;
+    else if(e.key==='Backspace')myName=myName.slice(0,-1);
+    else if(/^[A-Za-z0-9_-]$/.test(e.key)&&myName.length<12)myName+=e.key;
+    saveName();drawScreen();return;
+  }
+  if(!VR()&&e.code==='KeyE'&&!e.repeat&&nearComputer()){typing=true;drawScreen();return;}
+  if(!VR()&&!e.repeat&&MP.on){
+    if(e.code==='KeyM'){toggleMic();return;}
+    if(e.code==='KeyN'){muteNearest();return;}
+  }
   keys[e.code]=true;
   if(e.code==='Space'&&!VR())e.preventDefault();
   if(!VR()&&!e.repeat&&(e.code==='KeyF'||e.code==='ShiftLeft'||e.code==='ShiftRight')){ac=ac||new (window.AudioContext||window.webkitAudioContext)();fart();}
@@ -556,6 +745,9 @@ function domHud(){
   t+=cool>0?'Fart: recharging':'Fart: READY';
   t+='\nWASD move   Space jump / climb   F, Shift or click: fart';
   if(document.pointerLockElement!==renderer.domElement)t+='\n(click the game to lock your mouse)';
+  if(typing)t+='\nTyping name: '+myName+'_   (Enter to finish)';
+  else if(nearComputer())t+='\n[E] change your name ('+myName+')';
+  if(mp)t+='\nMic: '+(micStream?(micOn?'ON':'MUTED'):'none')+' (M)   Mute nearest player (N)';
   hudEl.textContent=t;
 }
 
@@ -570,7 +762,7 @@ renderer.setAnimationLoop(()=>{
   if(pressed&&!prevBtn)fart();
   prevBtn=pressed;
 
-  desktopUpdate(dt);
+  desktopUpdate(dt);kbUpdate(dt);
   // hand locomotion
   const move=new THREE.Vector3();let n=0;
   for(const h of (VR()?hands:[])){
@@ -688,6 +880,13 @@ async function start(m){
     if(!ok)renderer.domElement.requestPointerLock();
   }catch(e){msg.textContent='Could not start VR: '+e.message;}
 }
+document.getElementById('micbtn').onclick=async()=>{
+  const b=document.getElementById('micbtn');
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    micOn=true;setMicLabel();b.textContent='Mic ready';
+  }catch(err){b.textContent='Mic blocked';}
+};
 document.getElementById('rand').onclick=()=>{document.getElementById('room').value=Math.random().toString(36).slice(2,6).toUpperCase();};
 const pcBox=document.getElementById('pc');
 if(navigator.xr&&navigator.xr.isSessionSupported)navigator.xr.isSessionSupported('immersive-vr').then(ok=>{pcBox.checked=!ok;}).catch(()=>{pcBox.checked=true;});
