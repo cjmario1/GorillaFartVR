@@ -26,12 +26,12 @@ button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:1
   <h1>💨 GORILLA FART</h1>
   <p>Swing your arms and push off the ground, walls and trees to move. Press <b>A / B / X / Y</b> to rip a fart boost in the direction you're looking.</p>
   <p><b>On a computer:</b> WASD to move, Space to jump (hold it against walls and trees to climb), and F, Shift or click to fart.</p>
-  <p><b>Casual:</b> chill out with colorful gorillas that just wander around.<br><b>Infection:</b> red gorillas hunt you down. Survive as long as you can!</p>
-  <p>Climb the staircase up the giant tree, check out the computer, then drop into the hole to explore the caves. Walk into the glowing portal to climb back out. The caves have gorillas too, so watch out! A glowing orange portal out in the forest leads to the city.</p>
-  <p>Friends: type the same <b>room code</b> to play together. Leave it blank to play solo. Tap <b>Enable mic</b> first if you want voice chat (you can still listen without it).</p>
-  <div class="row" style="margin-top:6px"><input id="room" maxlength="4" placeholder="ROOM CODE"><button id="rand" class="sm">Random</button><button id="micbtn" class="sm">Enable mic</button></div>
+  <p>Hit <b>Play</b> to drop into a random room. Use the computer up in the big tree to change your name, join a friend's room code, and pick <b>Casual</b> or <b>Infection</b>.</p>
+  <p>Climb the staircase up the giant tree, check out the computer, then drop into the hole to explore the caves. Walk into the glowing portal to climb back out. The caves have gorillas too, so watch out! Glowing portals out in the forest lead to the city, beach, heaven and hell, and in Infection there's a cure lab too.</p>
+  <p>Tap <b>Enable mic</b> first if you want voice chat (you can still listen without it).</p>
+  <div class="row" style="margin-top:6px"><button id="micbtn" class="sm">Enable mic</button></div>
   <label style="margin-top:12px;cursor:pointer"><input type="checkbox" id="pc"> Play on computer (keyboard &amp; mouse)</label>
-  <div class="row"><button id="casual">Casual</button><button id="infection" class="inf">Infection</button></div>
+  <div class="row"><button id="play">Play</button></div>
   <p id="msg" style="opacity:.8"></p>
 </div>
 <div id="hud"></div><div id="cross"></div>
@@ -65,8 +65,17 @@ const HOLE={x:3,z:-6.5,hs:1.2,y:TH},CY=-40,PORTAL={x:22,z:-20},SPAWN={x:-2.5,y:T
 const nearHub=(x,z)=>(Math.abs(x)<11&&z>-19&&z<3)||(Math.abs(x)<7&&z>=3&&z<22);
 // MAPS: every map needs an entry here so it always has gorillas (counts per mode)
 const CITY_Y=-100,FP={x:-20,z:-16},CITY_SPAWN={x:10,z:10},CITY_EXIT={x:-10,z:-10};
-const MAPS={forest:{floor:0,casual:6,infection:3},cave:{floor:CY,casual:5,infection:3},city:{floor:CITY_Y,casual:5,infection:3}};
-const ENV={forest:{bg:0x9bd36a,fog:[15,60],hemi:1.1,sun:0.6},cave:{bg:0x07070d,fog:[6,32],hemi:0.5,sun:0.05},city:{bg:0x8ec5ff,fog:[28,62],hemi:1.0,sun:0.7}};
+const MAPS={forest:{floor:0,casual:6,infection:3},cave:{floor:CY,casual:5,infection:3},city:{floor:CITY_Y,casual:5,infection:3},beach:{floor:-160,casual:5,infection:3},heaven:{floor:-220,casual:5,infection:3},hell:{floor:-280,casual:4,infection:3},cure:{floor:-340,casual:0,infection:3}};
+const ENV={forest:{bg:0x9bd36a,fog:[15,60],hemi:1.1,sun:0.6},cave:{bg:0x07070d,fog:[6,32],hemi:0.5,sun:0.05},city:{bg:0x8ec5ff,fog:[28,62],hemi:1.0,sun:0.7},beach:{bg:0x87ceeb,fog:[30,70],hemi:1.1,sun:0.8},heaven:{bg:0xcfe8ff,fog:[25,60],hemi:1.3,sun:0.5},hell:{bg:0x2a0500,fog:[8,40],hemi:0.6,sun:0.1},cure:{bg:0x0b1d2a,fog:[12,50],hemi:0.8,sun:0.3}};
+const PORT={
+  city:{f:FP,e:CITY_EXIT,sp:CITY_SPAWN},
+  beach:{f:{x:-23,z:4},e:{x:24,z:24},sp:{x:0,z:12},col:0x33ccff,t:'BEACH'},
+  heaven:{f:{x:23,z:-14},e:{x:24,z:24},sp:{x:0,z:12},col:0xfff2a0,t:'HEAVEN'},
+  hell:{f:{x:23,z:8},e:{x:-24,z:24},sp:{x:0,z:8},col:0xff3b1a,t:'HELL'},
+  cure:{f:{x:-16,z:18},e:{x:24,z:-24},sp:{x:0,z:24},col:0x44ff88,t:'CURE'}
+};
+const nearPortal=(x,z)=>Object.values(PORT).some(p=>Math.hypot(x-p.f.x,z-p.f.z)<4);
+const CUREPOS=new THREE.Vector3();
 let curMap='forest',floorY=0;
 
 // ===== player name + computer keyboard =====
@@ -77,21 +86,30 @@ function loadName(){
   return d;
 }
 function saveName(){try{localStorage.setItem('gfName',myName);}catch(e){}}
-let myName=loadName(),typing=false;
-const COMP={keys:[]};
+let myName=loadName(),typing=false,typedCode='';
+let fartTotal=0;try{fartTotal=+localStorage.getItem('gfFarts')||0;}catch(e){}
+const COMP={keys:[],field:'name'};
+function note(t){
+  COMP.note=t;drawScreen();clearTimeout(COMP.nt);
+  COMP.nt=setTimeout(()=>{COMP.note='';drawScreen();},4500);
+}
 function drawScreen(){
   if(!COMP.sc)return;
-  const g=COMP.sc.getContext('2d');
+  let mp=false;try{mp=MP.on;}catch(e){}
+  const g=COMP.sc.getContext('2d'),nf=COMP.field==='name';
   g.fillStyle='#06240f';g.fillRect(0,0,256,160);
-  g.fillStyle='#7dff7d';g.font='bold 18px monospace';g.fillText('GORILLA COMPUTER',14,28);
-  g.font='14px monospace';g.fillText('YOUR NAME:',14,62);
-  g.font='bold 28px monospace';g.fillText(myName+(typing?'_':''),14,100);
-  g.font='13px monospace';g.fillText(typing?'Enter = done':'Poke keys (VR) / E (PC)',14,140);
+  g.fillStyle='#7dff7d';g.font='bold 16px monospace';g.fillText('GORILLA COMPUTER',10,20);
+  g.font='14px monospace';
+  g.fillText((nf?'>':' ')+'NAME: '+myName+(typing&&nf?'_':''),10,48);
+  g.fillText((!nf?'>':' ')+'CODE: '+(typedCode+(typing&&!nf?'_':'')).padEnd(4,'.'),10,72);
+  g.fillText(' ROOM: '+(mp?MP.code+' '+MP.mode.toUpperCase():'solo'),10,96);
+  g.fillText(' ROCKET FART IN: '+(100-fartTotal%100),10,120);
+  g.font='11px monospace';g.fillText(COMP.note||(typing?'Tab=field Enter=done':'Poke keys / E to type'),10,148);
   COMP.stex.needsUpdate=true;
 }
 function drawKeys(hi){
   const g=COMP.kc.getContext('2d');
-  g.fillStyle='#10202a';g.fillRect(0,0,512,354);
+  g.fillStyle='#10202a';g.fillRect(0,0,512,408);
   g.textAlign='center';g.font='bold 21px sans-serif';
   COMP.keys.forEach((q,i)=>{
     g.fillStyle=i===hi?'#8bd22a':'#2f4a5c';g.fillRect(q.x,q.y,q.w,q.h);
@@ -105,20 +123,30 @@ function initComputer(cx,cz,H){
   COMP.stex=new THREE.CanvasTexture(COMP.sc);
   const scr=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.56),new THREE.MeshBasicMaterial({map:COMP.stex}));
   scr.position.set(cx,H+1.225,cz-0.09);scene.add(scr);
-  COMP.kc=document.createElement('canvas');COMP.kc.width=512;COMP.kc.height=354;
+  COMP.kc=document.createElement('canvas');COMP.kc.width=512;COMP.kc.height=408;
   COMP.ktex=new THREE.CanvasTexture(COMP.kc);
-  COMP.pw=2.2;COMP.ph=2.2*354/512;COMP.px=cx+1.9;COMP.py=H+1.4;COMP.pz=cz-0.09;
+  COMP.pw=2.2;COMP.ph=2.2*408/512;COMP.px=cx+1.9;COMP.py=H+1.4;COMP.pz=cz-0.09;
   const kp=new THREE.Mesh(new THREE.PlaneGeometry(COMP.pw,COMP.ph),new THREE.MeshBasicMaterial({map:COMP.ktex}));
   kp.position.set(COMP.px,COMP.py,COMP.pz);scene.add(kp);
   ['1234567890','QWERTYUIOP','ASDFGHJKL-','ZXCVBNM_'].forEach((row,ri)=>{
     [...row].forEach((ch,ci)=>COMP.keys.push({l:ch,x:16+ci*48,y:16+ri*54,w:44,h:48}));
   });
   COMP.keys.push({l:'DEL',x:16,y:232,w:150,h:48},{l:'CLEAR',x:176,y:232,w:150,h:48},{l:'RESET',x:336,y:232,w:160,h:48},
-    {l:'NO MIC',id:'mic',x:16,y:286,w:150,h:48},{l:'MUTE NEAR',x:176,y:286,w:170,h:48},{l:'UNMUTE ALL',x:356,y:286,w:140,h:48});
+    {l:'NO MIC',id:'mic',x:16,y:286,w:150,h:48},{l:'MUTE NEAR',x:176,y:286,w:170,h:48},{l:'UNMUTE ALL',x:356,y:286,w:140,h:48},
+    {l:'EDIT: NAME',id:'field',x:16,y:340,w:150,h:48},{l:'JOIN',id:'join',x:176,y:340,w:120,h:48},{l:'MODE: -',id:'mode',x:306,y:340,w:190,h:48});
   drawScreen();drawKeys(-1);
 }
 function pressKey(q,i){
-  if(q.l==='DEL')myName=myName.slice(0,-1);
+  const codeKey=COMP.field==='code'&&(q.l.length===1||q.l==='DEL'||q.l==='CLEAR'||q.l==='RESET');
+  if(codeKey){
+    if(q.l==='DEL')typedCode=typedCode.slice(0,-1);
+    else if(q.l==='CLEAR'||q.l==='RESET')typedCode='';
+    else if(/[A-Z0-9]/.test(q.l)&&typedCode.length<4)typedCode+=q.l;
+  }
+  else if(q.id==='field'){COMP.field=COMP.field==='name'?'code':'name';q.l='EDIT: '+COMP.field.toUpperCase();}
+  else if(q.id==='join')joinTyped();
+  else if(q.id==='mode')toggleRoomMode();
+  else if(q.l==='DEL')myName=myName.slice(0,-1);
   else if(q.l==='CLEAR')myName='';
   else if(q.l==='RESET')myName='farter'+(1000+Math.floor(Math.random()*9000));
   else if(q.id==='mic')toggleMic();
@@ -135,7 +163,7 @@ function kbUpdate(dt){
     h.kc=(h.kc||0)-dt;
     const w=h.world;let k=-1;
     if(Math.abs(w.z-COMP.pz)<0.1&&Math.abs(w.x-COMP.px)<COMP.pw/2&&Math.abs(w.y-COMP.py)<COMP.ph/2){
-      const u=(w.x-(COMP.px-COMP.pw/2))/COMP.pw*512,v=(COMP.py+COMP.ph/2-w.y)/COMP.ph*354;
+      const u=(w.x-(COMP.px-COMP.pw/2))/COMP.pw*512,v=(COMP.py+COMP.ph/2-w.y)/COMP.ph*408;
       k=COMP.keys.findIndex(q=>u>=q.x&&u<=q.x+q.w&&v>=q.y&&v<=q.y+q.h);
     }
     if(k<0){h.kk=-1;continue;}
@@ -197,11 +225,11 @@ function addTree(x,z){
 for(let i=0;i<18;i++){
   const a=rnd()*6.28,r=4+rnd()*25;
   const tx=Math.cos(a)*r,tz=Math.sin(a)*r;
-  if(!nearHub(tx,tz)&&Math.hypot(tx-FP.x,tz-FP.z)>4)addTree(tx,tz);
+  if(!nearHub(tx,tz)&&!nearPortal(tx,tz))addTree(tx,tz);
 }
 for(let i=0;i<12;i++){
   const a=rnd()*6.28,r=4+rnd()*24,x=Math.cos(a)*r,z=Math.sin(a)*r,sz=0.7+rnd()*1.1;
-  if(nearHub(x,z)||Math.hypot(x-FP.x,z-FP.z)<4)continue;
+  if(nearHub(x,z)||nearPortal(x,z))continue;
   const m=new THREE.Mesh(new THREE.IcosahedronGeometry(sz,0),new THREE.MeshLambertMaterial({color:0x7d7d78,flatShading:true}));
   m.scale.y=0.8;m.position.set(x,sz*0.8,z);m.rotation.y=rnd()*3;scene.add(m);
   boxes.push({minX:x-sz*0.85,maxX:x+sz*0.85,minZ:z-sz*0.85,maxZ:z+sz*0.85,minY:0,top:sz*1.4});
@@ -282,16 +310,20 @@ function label(text,x,y,z,color){
   const c=document.createElement('canvas');c.width=256;c.height=96;
   const g=c.getContext('2d');g.fillStyle=color;g.font='bold 64px sans-serif';g.textAlign='center';g.fillText(text,128,70);
   const m=new THREE.Mesh(new THREE.PlaneGeometry(2.6,0.98),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),transparent:true,side:THREE.DoubleSide}));
-  m.position.set(x,y,z);scene.add(m);
+  m.position.set(x,y,z);scene.add(m);return m;
 }
 function portalAt(x,y,z,col,text){
+  const g=new THREE.Group();scene.add(g);
   const p=new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.2,5,20,1,true),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.4,side:THREE.DoubleSide}));
-  p.position.set(x,y+2.5,z);scene.add(p);
+  p.position.set(x,y+2.5,z);g.add(p);
   const r=new THREE.Mesh(new THREE.TorusGeometry(1.2,0.08,8,24),new THREE.MeshBasicMaterial({color:col}));
-  r.rotation.x=Math.PI/2;r.position.set(x,y+0.1,z);scene.add(r);
-  label(text,x,y+6,z,'#'+col.toString(16).padStart(6,'0'));
+  r.rotation.x=Math.PI/2;r.position.set(x,y+0.1,z);g.add(r);
+  g.add(label(text,x,y+6,z,'#'+col.toString(16).padStart(6,'0')));
+  return g;
 }
 portalAt(FP.x,0,FP.z,0xffaa33,'CITY');
+for(const k of['beach','heaven','hell','cure'])PORT[k].obj=portalAt(PORT[k].f.x,0,PORT[k].f.z,PORT[k].col,PORT[k].t);
+PORT.cure.obj.visible=false; // the cure lab only exists in Infection
 {
   const wc=document.createElement('canvas');wc.width=wc.height=64;
   const g=wc.getContext('2d');g.fillStyle='#e8e8e8';g.fillRect(0,0,64,64);
@@ -329,15 +361,77 @@ portalAt(FP.x,0,FP.z,0xffaa33,'CITY');
   portalAt(CITY_EXIT.x,CITY_Y,CITY_EXIT.z,0x66ffee,'FOREST');
 }
 
-function tp(map){
+// ===== beach / heaven / hell / cure maps =====
+function mapFloor(y,col,basic){const m=new THREE.Mesh(new THREE.PlaneGeometry(66,66),basic?new THREE.MeshBasicMaterial({color:col}):lm(col));m.rotation.x=-Math.PI/2;m.position.y=y;scene.add(m);}
+function pl(x,y,z,col,r){const l=new THREE.PointLight(col,1.2,r||30);l.position.set(x,y,z);scene.add(l);}
+const okAt=(m,x,z)=>Math.hypot(x-PORT[m].e.x,z-PORT[m].e.z)>4&&Math.hypot(x-PORT[m].sp.x,z-PORT[m].sp.z)>4;
+const R=(a,b)=>a+rnd()*(b-a);
+const LAVA=[],inLava=(x,z)=>LAVA.some(l=>Math.abs(x-l.x)<l.w/2&&Math.abs(z-l.z)<l.d/2);
+{ // beach
+  const Y=MAPS.beach.floor;mapFloor(Y,0xe8d9a0);
+  const w=new THREE.Mesh(new THREE.PlaneGeometry(66,26),new THREE.MeshLambertMaterial({color:0x2a90d6,transparent:true,opacity:0.8}));
+  w.rotation.x=-Math.PI/2;w.position.set(0,Y+0.04,-18);scene.add(w);
+  for(let i=0;i<12;i++){
+    const x=R(-28,28),z=R(-2,28),h=R(4,6.5);if(!okAt('beach',x,z))continue;
+    addBox(x,z,0.5,h,0.5,0x8a6a3a,Y);
+    for(let k=0;k<3;k++){const l=new THREE.Mesh(new THREE.SphereGeometry(1.5,8,6),lm(0x2f9a3a));l.scale.set(1,0.25,1);l.position.set(x+R(-1,1),Y+h+0.1,z+R(-1,1));scene.add(l);}
+  }
+  for(let i=0;i<6;i++){const x=R(-26,26),z=R(0,26);if(!okAt('beach',x,z))continue;addBox(x,z,0.15,2,0.15,0xdddddd,Y);addCone(x,z,1.5,0.7,Y+2,false,[0xff4d4d,0x4da6ff,0xffd84d][i%3]);}
+  for(let i=0;i<4;i++){const x=R(-24,24),z=R(2,24);if(!okAt('beach',x,z))continue;addBox(x,z,2.4,1,2.4,0xd8c488,Y);addBox(x,z,1.4,0.9,1.4,0xcdb97a,Y+1);}
+  addBox(0,-1.5,3,0.8,1.5,0x8a6a3a,Y);addBox(0,-12,3,0.5,18,0x8a6a3a,Y+1.2); // pier
+  for(const sz of[-4,-10,-16,-20])for(const sx of[-1.3,1.3])addBox(sx,sz,0.4,1.2,0.4,0x6b4a2a,Y);
+  addBox(14,8,3,0.3,3,0xffffff,Y+3);                                          // lifeguard tower
+  for(const a of[-1,1])for(const b of[-1,1])addBox(14+a*1.2,8+b*1.2,0.3,3,0.3,0xff5555,Y);
+  portalAt(PORT.beach.e.x,Y,PORT.beach.e.z,0x66ffee,'FOREST');
+}
+{ // heaven
+  const Y=MAPS.heaven.floor;mapFloor(Y,0xfdfdff,true);
+  for(let i=0;i<22;i++){const x=R(-27,27),z=R(-27,27);if(okAt('heaven',x,z))addBox(x,z,R(3,7),0.8,R(3,7),0xffffff,Y+R(1,14));}
+  for(let i=0;i<8;i++){const x=Math.cos(i*0.785)*15,z=Math.sin(i*0.785)*15;if(okAt('heaven',x,z))addBox(x,z,1.2,R(6,10),1.2,0xffd84a,Y);}
+  for(const sx of[-3,3])addBox(sx,-12,1.5,12,1.5,0xffd84a,Y);
+  addBox(0,-12,9,1.5,1.5,0xffd84a,Y+12);
+  for(let i=0;i<16;i++)addBox(-18,-20+i*1.4,3,(i+1)*0.5,1.4,0xfff0c0,Y);
+  addBox(-18,4.5,6,0.5,6,0xffd84a,Y+7.5);
+  const hl=new THREE.Mesh(new THREE.TorusGeometry(3,0.15,8,32),new THREE.MeshBasicMaterial({color:0xffe066}));hl.position.set(0,Y+17,-12);scene.add(hl);
+  portalAt(PORT.heaven.e.x,Y,PORT.heaven.e.z,0x66ffee,'FOREST');
+}
+{ // hell
+  const Y=MAPS.hell.floor;mapFloor(Y,0x2a0a06);
+  for(let i=0;i<7;i++){
+    const x=R(-24,24),z=R(-24,24),w=R(5,10),d=R(5,10);
+    if(Math.abs(x)<w/2+5&&Math.abs(z-8)<d/2+5)continue;
+    if(Math.hypot(x-PORT.hell.e.x,z-PORT.hell.e.z)<w/2+6)continue;
+    LAVA.push({x,z,w,d});
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,d),new THREE.MeshBasicMaterial({color:0xff4a10}));
+    m.rotation.x=-Math.PI/2;m.position.set(x,Y+0.03,z);scene.add(m);
+  }
+  for(let i=0;i<10;i++){const x=R(-27,27),z=R(-27,27);if(okAt('hell',x,z)&&!inLava(x,z))addBox(x,z,R(1.5,2.5),R(5,13),R(1.5,2.5),0x15090a,Y);}
+  for(let i=0;i<14;i++){const x=R(-27,27),z=R(-27,27);if(okAt('hell',x,z)&&!inLava(x,z))addCone(x,z,R(0.6,1.4),R(2,6),Y,false,0x3a1410);}
+  for(let i=0;i<9;i++)addBox(R(-26,26),R(-26,26),3,0.6,3,0x4a1a14,Y+R(2,8));
+  pl(-10,Y+4,-10,0xff4a10);pl(12,Y+4,6,0xff4a10);pl(0,Y+4,-20,0xff6a20);
+  portalAt(PORT.hell.e.x,Y,PORT.hell.e.z,0x66ffee,'FOREST');
+}
+{ // the cure lab (Infection only)
+  const Y=MAPS.cure.floor;mapFloor(Y,0x1c3a4a);
+  [10,8,6,4].forEach((w,i)=>addBox(0,0,w,3.5,w,i%2?0x2d6a82:0x3d8aa5,Y+i*3.5));
+  CUREPOS.set(0,Y+14.8,0);
+  const v=new THREE.Mesh(new THREE.SphereGeometry(0.3,12,10),new THREE.MeshBasicMaterial({color:0x44ff88}));v.position.copy(CUREPOS);scene.add(v);
+  pl(0,Y+17,0,0x44ff88,30);label('THE CURE',0,Y+17.5,0,'#44ff88');
+  for(let i=0;i<14;i++){const x=R(-27,27),z=R(-27,27);if(Math.hypot(x,z)>8&&okAt('cure',x,z))addBox(x,z,R(1.5,3.5),R(1,4),R(1.5,3.5),0x5a7a8a,Y);}
+  for(let i=0;i<8;i++){const x=R(-26,26),z=R(-26,26);if(Math.hypot(x,z)>8)addBox(x,z,3,0.5,3,0x44aacc,Y+R(2,8));}
+  portalAt(PORT.cure.e.x,Y,PORT.cure.e.z,0x66ffee,'FOREST');
+}
+
+function tp(map,at){
   camera.getWorldPosition(head);
   const ox=head.x-rig.position.x,oz=head.z-rig.position.z,from=curMap;
   curMap=map;floorY=MAPS[map].floor;
   let tx,tz,ty;
   if(map==='cave'){tx=0;tz=0;ty=floorY+0.3;}
-  else if(map==='city'){tx=CITY_SPAWN.x;tz=CITY_SPAWN.z;ty=floorY+0.3;}
-  else if(from==='city'){tx=FP.x+3;tz=FP.z;ty=0;}
+  else if(PORT[map]){tx=PORT[map].sp.x;tz=PORT[map].sp.z;ty=floorY+0.3;}
+  else if(PORT[from]){tx=PORT[from].f.x+3;tz=PORT[from].f.z;ty=0;}
   else{tx=SPAWN.x;tz=SPAWN.z;ty=SPAWN.y;}
+  if(at){tx=at.x;tz=at.z;ty=at.y!==undefined?at.y:floorY+0.3;}
   rig.position.set(tx-ox,ty,tz-oz);vel.set(0,0,0);
   hands.forEach(h=>{h.last=null;});
   const e=ENV[map];
@@ -358,7 +452,9 @@ function makeGorilla(color){
 function resetBots(){bots.forEach((b,i)=>{const a=i*2.1+rnd()*2;b.mesh.position.set(Math.cos(a)*18,0,Math.sin(a)*18);});}
 let mode='casual';
 function setMode(m){
-  mode=m;bots.forEach(b=>scene.remove(b.mesh));bots.length=0;
+  mode=m;if(curMap!=='forest')tp('forest');
+  PORT.cure.obj.visible=m==='infection';
+  bots.forEach(b=>scene.remove(b.mesh));bots.length=0;
   const cols=[0x3b82f6,0xf5c518,0xa855f7,0x22c55e,0xff8c1a,0x14b8a6];
   let ci=0;
   for(const k in MAPS){
@@ -394,7 +490,7 @@ function drawHud(){
   x.fillStyle='#333';x.fillRect(14,92,228,18);
   x.fillStyle=cool>0?'#e8a020':'#8bd22a';x.fillRect(14,92,228*(1-Math.max(cool,0)/COOL),18);
   x.font='15px sans-serif';x.fillStyle='#bff25a';
-  if(MP.on)x.fillText('Room '+MP.code+' - '+(MP.n+1)+' players'+(MP.infected?' - INFECTED':''),14,124);
+  if(MP.on)x.fillText(MP.msgT>0?MP.msg:'Room '+MP.code+' - '+(MP.n+1)+' players'+(MP.infected?' - INFECTED':MP.cured?' - CURED':''),14,124);
   htex.needsUpdate=true;
 }
 
@@ -428,9 +524,9 @@ function fartSound(vol=1,pan=0){
 // puffs
 const puffs=[];
 const puffGeo=new THREE.SphereGeometry(0.2,8,6);
-function spawnPuffs(pos,dir){
-  for(let i=0;i<8;i++){
-    const m=new THREE.Mesh(puffGeo,new THREE.MeshBasicMaterial({color:0x9acd32,transparent:true,opacity:0.7}));
+function spawnPuffs(pos,dir,col=0x9acd32,n=8){
+  for(let i=0;i<n;i++){
+    const m=new THREE.Mesh(puffGeo,new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.7}));
     m.position.copy(pos).addScaledVector(dir,-0.1*i).add(new THREE.Vector3((rnd()-.5)*.3,(rnd()-.5)*.3,(rnd()-.5)*.3));
     scene.add(m);puffs.push({m,life:1});
   }
@@ -441,16 +537,27 @@ const vel=new THREE.Vector3();
 const REACH=1,COOL=0.7;let cool=0,boostT=0,time=0,best=0,hudT=0,prevBtn=false;
 const tmp=new THREE.Vector3(),head=new THREE.Vector3(),fwd=new THREE.Vector3();
 
+function rocketSound(){
+  if(!ac)return;const t=ac.currentTime;
+  const o=ac.createOscillator(),g=ac.createGain();
+  o.type='sawtooth';o.frequency.setValueAtTime(60,t);o.frequency.exponentialRampToValueAtTime(420,t+1.1);
+  g.gain.setValueAtTime(0.6,t);g.gain.exponentialRampToValueAtTime(0.001,t+1.3);
+  o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+1.4);
+}
 function fart(){
   if(cool>0)return;
+  fartTotal++;try{localStorage.setItem('gfFarts',fartTotal);}catch(e){}
+  const rocket=fartTotal%100===0;
   camera.getWorldPosition(head);camera.getWorldDirection(fwd);
   tmp.copy(fwd);tmp.y+=0.35;tmp.normalize();
-  vel.addScaledVector(tmp,7);
-  if(vel.length()>13)vel.setLength(13);
-  boostT=0.25;cool=COOL;fartCount++;
-  spawnPuffs(head.clone().add(new THREE.Vector3(0,-0.5,0)).addScaledVector(fwd,-0.2),fwd);
-  fartSound();
-  hands.forEach(h=>buzz(h,0.8,120));
+  vel.addScaledVector(tmp,rocket?24:7);
+  if(vel.length()>(rocket?30:13))vel.setLength(rocket?30:13);
+  boostT=rocket?0.6:0.25;cool=COOL;fartCount++;
+  const bp=head.clone().add(new THREE.Vector3(0,-0.5,0)).addScaledVector(fwd,-0.2);
+  if(rocket){spawnPuffs(bp,fwd,0xff8a1a,28);rocketSound();MP.msg='ROCKET FART!';MP.msgT=3;}
+  else{spawnPuffs(bp,fwd);fartSound();}
+  hands.forEach(h=>buzz(h,rocket?1:0.8,rocket?400:120));
+  drawScreen();
 }
 
 
@@ -472,8 +579,8 @@ const FIREBASE_CONFIG={
   messagingSenderId:"934560681387",
   appId:"1:934560681387:web:0432beb1233ee48f0216ee"
 };
-const MP={on:false,code:'',id:null,mode:'casual',infected:false,n:0,remotes:{},off:0};
-let db=null,fartCount=0,mpT=0,mpS=0;
+const MP={on:false,code:'',id:null,mode:'casual',infected:false,cured:false,msg:'',msgT:0,roundAt:0,n:0,remotes:{},off:0};
+let db=null,fartCount=0,mpT=0,mpS=0,mpR=0;
 const mh=new THREE.Vector3(),mf=new THREE.Vector3(),vl=new THREE.Vector3(),vf=new THREE.Vector3();
 let micStream=null,micOn=true;
 const AV_COLS=[0x3b82f6,0xf5c518,0xa855f7,0x22c55e,0xff8c1a,0x14b8a6];
@@ -576,6 +683,63 @@ async function voiceSignal(m){
     }
   }catch(e){}
 }
+
+// ===== rounds, cure, rooms =====
+const SPOTS=[
+  {m:'forest',x:SPAWN.x,z:SPAWN.z,y:TH},{m:'forest',x:0,z:19},{m:'forest',x:-17,z:-16},
+  {m:'city',x:10,z:10},{m:'city',x:-10,z:10},{m:'city',x:10,z:-10},{m:'cave',x:0,z:0},
+  {m:'beach',x:0,z:12},{m:'heaven',x:0,z:12},{m:'hell',x:0,z:8},{m:'cure',x:0,z:24}
+];
+function startRound(){
+  if(!MP.on)return;
+  const ids=[MP.id,...Object.keys(MP.remotes)];
+  db.ref('rooms/'+MP.code+'/round').set({n:Date.now(),it:ids[Math.floor(Math.random()*ids.length)],spot:Math.floor(Math.random()*SPOTS.length)}).catch(()=>note('ROUNDS NEED NEW RULES'));
+}
+function applyRound(v){
+  MP.infected=MP.mode==='infection'&&v.it===MP.id;MP.cured=false;MP.roundAt=Date.now();
+  const sp=SPOTS[v.spot%SPOTS.length];
+  tp(sp.m,{x:sp.x,z:sp.z,y:sp.y});
+  MP.msg=MP.infected?'NEW ROUND - YOU ARE IT!':'NEW ROUND - RUN!';MP.msgT=5;
+}
+function roundCheck(){
+  if(MP.mode!=='infection'||Date.now()-MP.roundAt<8000)return;
+  const ks=Object.keys(MP.remotes).filter(k=>MP.remotes[k].init);
+  if(!ks.length)return;
+  const done=(MP.infected||MP.cured)&&ks.every(k=>MP.remotes[k].inf||MP.remotes[k].cured);
+  if(done&&ks.every(k=>MP.id<k)){MP.roundAt=Date.now();startRound();}
+}
+function cureCheck(){
+  if(curMap!=='cure'||MP.mode!=='infection'||MP.infected||MP.cured)return;
+  camera.getWorldPosition(vl);
+  if(vl.distanceTo(CUREPOS)<1.4){MP.cured=true;MP.msg='YOU ARE CURED - IMMORTAL!';MP.msgT=5;}
+}
+function setModeLabel(){
+  const k=COMP.keys.find(q=>q.id==='mode');
+  if(k)k.l='MODE: '+(MP.on?MP.mode.toUpperCase():'-');
+  drawKeys(-1);drawScreen();
+}
+function toggleRoomMode(){
+  if(!MP.on){note('NOT IN A ROOM (OFFLINE)');return;}
+  const nm=MP.mode==='casual'?'infection':'casual';
+  db.ref('rooms/'+MP.code+'/mode').set(nm).catch(()=>note('MODE BLOCKED - CHECK RULES'));
+  note('MODE -> '+nm.toUpperCase());
+  if(nm==='infection')startRound();
+}
+function joinTyped(){
+  if(!MP.on){note('NOT IN A ROOM (OFFLINE)');return;}
+  if(typedCode.length!==4){note('USE EDIT: CODE, TYPE 4 CHARS');return;}
+  if(typedCode===MP.code){note('ALREADY IN '+MP.code);return;}
+  note('JOINING '+typedCode+'...');switchRoom(typedCode);
+}
+async function switchRoom(code){
+  const old=MP.code;mpLeave();
+  try{const use=await mpJoin(code,'casual');setMode(use);MP.msg='JOINED ROOM '+code;note('JOINED '+code);}
+  catch(e){
+    try{setMode(await mpJoin(old,'casual'));}catch(e2){}
+    MP.msg='COULD NOT JOIN '+code;note(String(e.message||'JOIN FAILED').slice(0,34));
+  }
+  MP.msgT=4;typedCode='';setModeLabel();
+}
 function mpReady(){return typeof firebase!=='undefined'&&FIREBASE_CONFIG.apiKey!=='YOUR_API_KEY';}
 async function mpJoin(code,m){
   if(!mpReady())throw new Error('Multiplayer not set up yet: add your Firebase config to the file.');
@@ -591,20 +755,27 @@ async function mpJoin(code,m){
   let rm=m;
   if(others.length){rm=(await base.child('mode').once('value')).val()||m;}
   else await base.child('mode').set(m);
-  MP.on=true;MP.code=code;MP.mode=rm;
+  MP.on=true;MP.code=code;MP.mode=rm;MP.base=base;MP.roundAt=Date.now();MP.cured=false;MP.roundInit=false;
   MP.infected=rm==='infection'&&!others.some(o=>o.inf);
   MP.ref=base.child('players/'+MP.id);MP.ref.onDisconnect().remove();
   MP.tagRef=base.child('tags/'+MP.id);MP.tagRef.remove();
-  MP.tagRef.on('value',sn=>{if(sn.exists()&&MP.mode==='infection'&&!MP.infected){MP.infected=true;MP.tagRef.remove();}});
+  MP.tagRef.on('value',sn=>{if(sn.exists()&&MP.mode==='infection'&&!MP.infected&&!MP.cured){MP.infected=true;MP.tagRef.remove();}});
   MP.sig=base.child('sig/'+MP.id);MP.sig.remove();
   MP.sig.on('child_added',sn=>{const m=sn.val();sn.ref.remove();if(m)voiceSignal(m);});
+  base.child('mode').on('value',sn=>{const v=sn.val();if(!v||v===MP.mode)return;MP.mode=v;MP.infected=false;MP.cured=false;setMode(v);setModeLabel();});
+  base.child('round').on('value',sn=>{
+    const v=sn.val();
+    if(!MP.roundInit){MP.roundInit=true;MP.lastRound=v?v.n:0;return;}
+    if(!v||v.n===MP.lastRound)return;
+    MP.lastRound=v.n;applyRound(v);
+  });
   MP.players=base.child('players');
   MP.players.on('value',sn=>{
     sn.forEach(c=>{
       if(c.key===MP.id)return;const v=c.val();if(!v)return;
       let r=MP.remotes[c.key];
       if(!r){r=MP.remotes[c.key]=makeAvatar(c.key);r.f=v.f||0;if(MP.id<c.key)voiceOffer(c.key);}
-      r.t=v;r.inf=!!v.inf;r.seen=Date.now();
+      r.t=v;r.inf=!!v.inf;r.cured=!!v.c;r.seen=Date.now();
       if((v.f||0)!==r.f){r.f=v.f||0;remoteFart(r);}
     });
   });
@@ -613,7 +784,8 @@ async function mpJoin(code,m){
 function mpLeave(){
   if(!MP.on)return;
   MP.on=false;
-  try{MP.players.off();MP.tagRef.off();MP.sig.off();MP.ref.remove();}catch(e){}
+  try{MP.players.off();MP.tagRef.off();MP.sig.off();MP.base.child('mode').off();MP.base.child('round').off();MP.ref.remove();}catch(e){}
+  MP.cured=false;
   for(const k in peers)voiceClose(k);
   for(const k in MP.remotes){scene.remove(MP.remotes[k].g);}
   MP.remotes={};MP.infected=false;MP.n=0;
@@ -621,14 +793,16 @@ function mpLeave(){
 function mpUpdate(dt){
   if(!MP.on)return;
   const nowL=Date.now();
-  mpT+=dt;mpS+=dt;
+  mpT+=dt;mpS+=dt;MP.msgT-=dt;mpR+=dt;
+  if(mpR>=1){mpR=0;roundCheck();}
+  cureCheck();
   if(mpT>=0.1){
     mpT=0;
     camera.getWorldPosition(mh);camera.getWorldDirection(mf);
     const q=v=>Math.round(v*100)/100,yw=Math.atan2(mf.x,mf.z);
     const hw=(h,sd)=>VR()&&h.world?[q(h.world.x),q(h.world.y),q(h.world.z)]:[q(mh.x+Math.cos(yw)*sd*0.35+Math.sin(yw)*0.2),q(mh.y-0.6),q(mh.z-Math.sin(yw)*sd*0.35+Math.cos(yw)*0.2)];
-    MP.ref.set({ts:Date.now()+MP.off,h:[q(mh.x),q(mh.y),q(mh.z),q(yw)],l:hw(hands[0],-1),r:hw(hands[1],1),f:fartCount,n:myName,inf:MP.infected?1:0});
-    hands.forEach((h,i)=>h.mesh.material.color.set(MP.infected?0xcc2222:(i?0x333333:0x555555)));
+    MP.ref.set({ts:Date.now()+MP.off,h:[q(mh.x),q(mh.y),q(mh.z),q(yw)],l:hw(hands[0],-1),r:hw(hands[1],1),f:fartCount,n:myName,c:MP.cured?1:0,inf:MP.infected?1:0});
+    hands.forEach((h,i)=>h.mesh.material.color.set(MP.infected?0xcc2222:MP.cured?0xffd84a:(i?0x333333:0x555555)));
   }
   const a=Math.min(1,dt*15);
   camera.getWorldPosition(vl);camera.getWorldDirection(vf);
@@ -639,8 +813,8 @@ function mpUpdate(dt){
     const set=(m,v,off)=>{mh.set(v[0],v[1]+(off||0),v[2]);if(!r.init)m.position.copy(mh);else m.position.lerp(mh,a);};
     set(r.head,t.h);set(r.body,t.h,-0.55);set(r.l,t.l);set(r.r,t.r);
     r.init=true;r.head.rotation.y=r.body.rotation.y=t.h[3];
-    r.mat.color.set(r.inf?0xcc2222:r.base);
-    const nm0=String(t.n||'gorilla').slice(0,14),nm=nm0+(r.muted?' (muted)':''),nk=nm+(r.inf?'1':'0');
+    r.mat.color.set(r.inf?0xcc2222:r.cured?0xffd84a:r.base);
+    const nm0=String(t.n||'gorilla').slice(0,14),nm=nm0+(r.cured?' *':'')+(r.muted?' (muted)':''),nk=nm+(r.inf?'1':'0');
     if(nk!==r.nk){
       r.nk=nk;const tg=r.tagCanvas.getContext('2d');
       tg.clearRect(0,0,256,64);tg.font='bold 34px sans-serif';tg.textAlign='center';
@@ -660,7 +834,7 @@ function mpUpdate(dt){
     if(MP.infected){
       camera.getWorldPosition(mh);
       for(const k in MP.remotes){
-        const r=MP.remotes[k];if(r.inf||r.tagged>nowL||!r.init)continue;
+        const r=MP.remotes[k];if(r.inf||r.cured||r.tagged>nowL||!r.init)continue;
         let hd=9;hands.forEach(h=>{if(h.world)hd=Math.min(hd,h.world.distanceTo(r.head.position));});
         if(r.head.position.distanceTo(mh)<0.9||hd<0.5){
           r.inf=true;r.tagged=nowL+2000;
@@ -682,12 +856,17 @@ camera.rotation.order='YXZ';
 addEventListener('keydown',e=>{
   if(!VR()&&typing){
     e.preventDefault();
-    if(e.key==='Enter'||e.key==='Escape')typing=false;
-    else if(e.key==='Backspace')myName=myName.slice(0,-1);
-    else if(/^[A-Za-z0-9_-]$/.test(e.key)&&myName.length<12)myName+=e.key;
+    const cf=COMP.field==='code';
+    if(e.key==='Tab')COMP.field=cf?'name':'code';
+    else if(e.key==='Enter'){if(cf&&typedCode.length===4)joinTyped();typing=false;}
+    else if(e.key==='Escape')typing=false;
+    else if(e.key==='Backspace'){if(cf)typedCode=typedCode.slice(0,-1);else myName=myName.slice(0,-1);}
+    else if(cf&&/^[A-Za-z0-9]$/.test(e.key)&&typedCode.length<4)typedCode+=e.key.toUpperCase();
+    else if(!cf&&/^[A-Za-z0-9_-]$/.test(e.key)&&myName.length<12)myName+=e.key;
     saveName();drawScreen();return;
   }
   if(!VR()&&e.code==='KeyE'&&!e.repeat&&nearComputer()){typing=true;drawScreen();return;}
+  if(!VR()&&e.code==='KeyR'&&!e.repeat&&nearComputer()){toggleRoomMode();return;}
   if(!VR()&&!e.repeat&&MP.on){
     if(e.code==='KeyM'){toggleMic();return;}
     if(e.code==='KeyN'){muteNearest();return;}
@@ -746,8 +925,9 @@ function domHud(){
   t+='\nWASD move   Space jump / climb   F, Shift or click: fart';
   if(document.pointerLockElement!==renderer.domElement)t+='\n(click the game to lock your mouse)';
   if(typing)t+='\nTyping name: '+myName+'_   (Enter to finish)';
-  else if(nearComputer())t+='\n[E] change your name ('+myName+')';
+  else if(nearComputer())t+='\n[E] type name / room code   [R] switch Casual/Infection';
   if(mp)t+='\nMic: '+(micStream?(micOn?'ON':'MUTED'):'none')+' (M)   Mute nearest player (N)';
+  if(mp&&MP.msgT>0)t+='\n'+MP.msg;
   hudEl.textContent=t;
 }
 
@@ -819,8 +999,14 @@ renderer.setAnimationLoop(()=>{
     if(rig.position.y<HOLE.y-1.5)tp('cave');
   }else if(rig.position.y<floorY){rig.position.y=floorY;if(vel.y<0)vel.y=0;vel.x*=0.9;vel.z*=0.9;}
   if(curMap==='cave'&&Math.hypot(head.x-PORTAL.x,head.z-PORTAL.z)<1.3)tp('forest');
-  else if(curMap==='forest'&&rig.position.y<1&&Math.hypot(head.x-FP.x,head.z-FP.z)<1.3)tp('city');
-  else if(curMap==='city'&&Math.hypot(head.x-CITY_EXIT.x,head.z-CITY_EXIT.z)<1.3)tp('forest');
+  else{
+    for(const k in PORT){
+      const P=PORT[k];
+      if(curMap==='forest'&&rig.position.y<1&&(k!=='cure'||mode==='infection')&&Math.hypot(head.x-P.f.x,head.z-P.f.z)<1.3){tp(k);break;}
+      if(curMap===k&&Math.hypot(head.x-P.e.x,head.z-P.e.z)<1.3){tp('forest');break;}
+    }
+  }
+  if(curMap==='hell'&&rig.position.y<MAPS.hell.floor+0.6&&inLava(head.x,head.z)){tp('hell');}
   if(Math.abs(rig.position.x)>30){rig.position.x=Math.sign(rig.position.x)*30;vel.x=0;}
   if(Math.abs(rig.position.z)>30){rig.position.z=Math.sign(rig.position.z)*30;vel.z=0;}
 
@@ -860,7 +1046,7 @@ addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updat
 const ui=document.getElementById('ui'),msg=document.getElementById('msg');
 async function start(m){
   ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();
-  const code=document.getElementById('room').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const code=(Math.random().toString(36)+'0000').slice(2,6).toUpperCase();
   const pc=document.getElementById('pc').checked;
   let s=null;
   try{
@@ -871,11 +1057,11 @@ async function start(m){
       await renderer.xr.setSession(s);
     }
     let use=m;
-    if(code){
+    if(code&&mpReady()){
       try{use=await mpJoin(code,m);}
       catch(err){msg.textContent=err.message;if(s)s.end();return;}
     }
-    setMode(use);
+    setMode(use);setModeLabel();
     ui.style.display='none';
     if(!ok)renderer.domElement.requestPointerLock();
   }catch(e){msg.textContent='Could not start VR: '+e.message;}
@@ -887,12 +1073,10 @@ document.getElementById('micbtn').onclick=async()=>{
     micOn=true;setMicLabel();b.textContent='Mic ready';
   }catch(err){b.textContent='Mic blocked';}
 };
-document.getElementById('rand').onclick=()=>{document.getElementById('room').value=Math.random().toString(36).slice(2,6).toUpperCase();};
 const pcBox=document.getElementById('pc');
 if(navigator.xr&&navigator.xr.isSessionSupported)navigator.xr.isSessionSupported('immersive-vr').then(ok=>{pcBox.checked=!ok;}).catch(()=>{pcBox.checked=true;});
 else pcBox.checked=true;
-document.getElementById('casual').onclick=()=>start('casual');
-document.getElementById('infection').onclick=()=>start('infection');
+document.getElementById('play').onclick=()=>start('casual');
 </script>
 </body>
 </html>
