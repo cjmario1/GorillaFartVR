@@ -24,6 +24,9 @@ input.tx{font-size:18px;padding:10px;border-radius:10px;border:2px solid var(--a
 .bg.on{border-color:var(--ac)}
 .lvbar{height:12px;border-radius:8px;background:rgba(0,0,0,.35);overflow:hidden;max-width:300px;margin:4px auto}
 #lvfill{height:100%;width:0;background:var(--ac)}
+#lvpc{position:fixed;top:10px;right:10px;width:190px;background:rgba(0,0,0,.55);color:#eaffc8;padding:10px 14px;border-radius:10px;font:14px/1.4 system-ui,sans-serif;pointer-events:none;display:none;box-sizing:border-box}
+#lvpc .lvbar{max-width:none;margin:5px 0}
+#lvpcf{height:100%;width:0;background:#8bd22a}
 .sw{display:inline-block;width:30px;height:30px;border-radius:50%;margin:3px;border:3px solid transparent;cursor:pointer;vertical-align:middle;box-sizing:border-box}
 .sw.on{border-color:#fff}
 .sw.auto{width:auto;border-radius:15px;padding:3px 10px;font-size:13px;line-height:20px;border:3px dashed var(--ac)}
@@ -59,6 +62,7 @@ button{margin-top:16px;font-size:22px;padding:14px 32px;border:0;border-radius:1
   <p id="msg" style="opacity:.8"></p>
 </div>
 <div id="hud"></div><div id="cross"></div>
+<div id="lvpc"><b id="lvpct"></b><div class="lvbar"><div id="lvpcf"></div></div><div id="lvpcn" style="font-size:12px;opacity:.9"></div></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"></script>
 <script>if(!window.supabase)document.write('<script src="https://unpkg.com/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"><\/script>');</script>
@@ -131,7 +135,7 @@ function entitled(name){
   if(n==='day_night_time')return ALL_BADGES.filter(i=>i!=='owner');
   return ['imnew'];
 }
-const ACC={user:null,name:'',owned:[],equipped:'',init:false,busy:false,ready:null,farts:0,pend:0};
+const ACC={user:null,name:'',owned:[],equipped:'',init:false,busy:false,ready:null,farts:0,pend:0,saveErr:''};
 const SPRITE_TEX=new Set(),BADGE_TEX={};
 function badgeTex(id){
   if(BADGE_TEX[id])return BADGE_TEX[id];
@@ -357,14 +361,19 @@ async function flushXP(){
   const n=ACC.pend,lv0=levelFor(ACC.farts),own0=ACC.owned.slice();ACC.pend=0;
   try{
     const r=await rpc('gf_farts',{p_token:getTok(),p_delta:n});
-    if(!r)return;
+    if(!r)throw new Error('no answer from the database');
+    ACC.saveErr='';accMsg('');
     ACC.farts=r.farts+ACC.pend;
     ACC.owned=ALL_BADGES.filter(i=>(r.owned||[]).includes(i));
     const lv1=levelFor(ACC.farts),won=ACC.owned.filter(i=>!own0.includes(i));
     if(won.length){MP.msg='BADGE UNLOCKED: '+won.map(i=>BADGE_BY_ID[i].name).join(', ');MP.msgT=5;}
     else if(lv1>lv0){MP.msg='LEVEL UP! LEVEL '+lv1;MP.msgT=4;}
     afterAccountChange();
-  }catch(e){ACC.pend+=n;}
+  }catch(e){
+    ACC.pend+=n;ACC.saveErr=accErr(e);accMsg('Levels not saving: '+ACC.saveErr);
+    try{console.warn('gf_farts failed',e);}catch(_){}
+    queueXP(15000);                       // try again in a bit
+  }
 }
 async function rpc(fn,args){
   const c=getSB();if(!c)throw new Error('offline');
@@ -387,7 +396,7 @@ function accErr(e){
 }
 function applyMe(me){
   if(!me){ACC.user=null;ACC.name='';ACC.owned=[];ACC.equipped='';ACC.farts=0;ACC.pend=0;myName=loadName();afterAccountChange();return;}
-  ACC.user={uid:me.id};ACC.name=me.display_name||'';ACC.farts=me.farts||0;ACC.pend=0;
+  ACC.user={uid:me.id};ACC.name=me.display_name||'';ACC.farts=me.farts||0;ACC.pend=0;ACC.saveErr=(typeof me.farts==='number')?'':'database has no levels yet - run the SQL file again';if(ACC.saveErr)accMsg('Levels not saving: '+ACC.saveErr);
   ACC.owned=ALL_BADGES.filter(i=>(me.owned||[]).includes(i));
   ACC.equipped=ACC.owned.includes(me.equipped)?me.equipped:'';
   if(ACC.name)myName=ACC.name;
@@ -505,12 +514,12 @@ function drawScreen(){
   {const bb=BADGE_BY_ID[ACC.equipped];g.fillText(' BADGE: '+(ACC.user?(bb?bb.name:'none'):'(log in)'),10,110);}
   g.fillText(' COLOR: '+(MYCOL===null?'auto':hexOf(MYCOL)),10,128);
   if(MYCOL!==null){g.fillStyle=hexOf(MYCOL);g.fillRect(150,117,14,14);g.fillStyle='#7dff7d';}
-  g.font='11px monospace';g.fillText(COMP.note||(typing?'Tab=field Enter=done':'Poke keys / E to type'),10,148);
+  g.font='11px monospace';g.fillText(COMP.note||(typing?'Tab=field Enter=done':(VR()?'Poke a TYPE button':'E to type')),10,148);
   COMP.stex.needsUpdate=true;
 }
 function drawKeys(hi){
   const g=COMP.kc.getContext('2d');
-  g.fillStyle='#10202a';g.fillRect(0,0,512,512);
+  g.fillStyle='#10202a';g.fillRect(0,0,512,COMP.kh);
   g.textAlign='center';g.font='bold 21px sans-serif';
   COMP.keys.forEach((q,i)=>{
     g.fillStyle=i===hi?'#8bd22a':'#2f4a5c';g.fillRect(q.x,q.y,q.w,q.h);
@@ -524,45 +533,62 @@ function initComputer(cx,cz,H){
   COMP.stex=new THREE.CanvasTexture(COMP.sc);
   const scr=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.56),new THREE.MeshBasicMaterial({map:COMP.stex}));
   scr.position.set(cx,H+1.225,cz-0.09);scene.add(scr);
-  COMP.kc=document.createElement('canvas');COMP.kc.width=512;COMP.kc.height=512;
+  COMP.kc=document.createElement('canvas');COMP.kh=340;COMP.kc.width=512;COMP.kc.height=COMP.kh;
   COMP.ktex=new THREE.CanvasTexture(COMP.kc);
-  COMP.pw=2.2;COMP.ph=2.2*512/512;COMP.px=cx+1.9;COMP.py=H+1.4;COMP.pz=cz-0.09;
+  COMP.pw=2.2;COMP.ph=2.2*COMP.kh/512;COMP.px=cx+1.9;COMP.py=H+1.4;COMP.pz=cz-0.09;
   const kp=new THREE.Mesh(new THREE.PlaneGeometry(COMP.pw,COMP.ph),new THREE.MeshBasicMaterial({map:COMP.ktex}));
   kp.position.set(COMP.px,COMP.py,COMP.pz);scene.add(kp);
-  ['1234567890','QWERTYUIOP','ASDFGHJKL-','ZXCVBNM_'].forEach((row,ri)=>{
-    [...row].forEach((ch,ci)=>COMP.keys.push({l:ch,x:16+ci*48,y:16+ri*54,w:44,h:48}));
-  });
-  COMP.keys.push({l:'DEL',x:16,y:232,w:150,h:48},{l:'CLEAR',x:176,y:232,w:150,h:48},{l:'RESET',x:336,y:232,w:160,h:48},
-    {l:'NO MIC',id:'mic',x:16,y:286,w:150,h:48},{l:'MUTE NEAR',x:176,y:286,w:170,h:48},{l:'UNMUTE ALL',x:356,y:286,w:140,h:48},
-    {l:'EDIT: NAME',id:'field',x:16,y:340,w:150,h:48},{l:'JOIN',id:'join',x:176,y:340,w:120,h:48},{l:'MODE: -',id:'mode',x:306,y:340,w:190,h:48},
-    {l:'BADGE <',id:'bprev',x:16,y:394,w:150,h:48},{l:'BADGE >',id:'bnext',x:176,y:394,w:150,h:48},
-    {l:'COLOR <',id:'cprev',x:16,y:448,w:150,h:48},{l:'COLOR >',id:'cnext',x:176,y:448,w:150,h:48});
+  // buttons only: typing is done with the headset's own keyboard
+  COMP.keys.push(
+    {l:'TYPE NAME',id:'tname',x:16,y:16,w:236,h:48},{l:'TYPE CODE',id:'tcode',x:260,y:16,w:236,h:48},
+    {l:'RANDOM NAME',id:'rname',x:16,y:70,w:236,h:48},{l:'JOIN',id:'join',x:260,y:70,w:236,h:48},
+    {l:'MODE: -',id:'mode',x:16,y:124,w:236,h:48},{l:'NO MIC',id:'mic',x:260,y:124,w:236,h:48},
+    {l:'MUTE NEAR',id:'mnear',x:16,y:178,w:236,h:48},{l:'UNMUTE ALL',id:'munall',x:260,y:178,w:236,h:48},
+    {l:'BADGE <',id:'bprev',x:16,y:232,w:236,h:48},{l:'BADGE >',id:'bnext',x:260,y:232,w:236,h:48},
+    {l:'COLOR <',id:'cprev',x:16,y:286,w:236,h:48},{l:'COLOR >',id:'cnext',x:260,y:286,w:236,h:48});
   drawScreen();drawKeys(-1);
 }
 function pressKey(q,i){
-  const codeKey=COMP.field==='code'&&(q.l.length===1||q.l==='DEL'||q.l==='CLEAR'||q.l==='RESET');
-  if(codeKey){
-    if(q.l==='DEL')typedCode=typedCode.slice(0,-1);
-    else if(q.l==='CLEAR'||q.l==='RESET')typedCode='';
-    else if(/[A-Z0-9]/.test(q.l)&&typedCode.length<4)typedCode+=q.l;
-  }
-  else if(q.id==='field'){COMP.field=COMP.field==='name'?'code':'name';q.l='EDIT: '+COMP.field.toUpperCase();}
+  if(q.id==='tname'){COMP.field='name';openVRKeyboard('name');}
+  else if(q.id==='tcode'){COMP.field='code';openVRKeyboard('code');}
+  else if(q.id==='rname')myName='farter'+(1000+Math.floor(Math.random()*9000));
   else if(q.id==='join')joinTyped();
   else if(q.id==='mode')toggleRoomMode();
   else if(q.id==='bprev')cycleBadge(-1);
   else if(q.id==='bnext')cycleBadge(1);
   else if(q.id==='cprev')cycleColor(-1);
   else if(q.id==='cnext')cycleColor(1);
-  else if(q.l==='DEL')myName=myName.slice(0,-1);
-  else if(q.l==='CLEAR')myName='';
-  else if(q.l==='RESET')myName='farter'+(1000+Math.floor(Math.random()*9000));
   else if(q.id==='mic')toggleMic();
-  else if(q.l==='MUTE NEAR')muteNearest();
-  else if(q.l==='UNMUTE ALL')Object.values(MP.remotes).forEach(r=>{r.muted=false;r.nk='';});
-  else if(myName.length<12)myName+=q.l;
+  else if(q.id==='mnear')muteNearest();
+  else if(q.id==='munall')Object.values(MP.remotes).forEach(r=>{r.muted=false;r.nk='';});
   saveName();drawScreen();drawKeys(i);
   setTimeout(()=>drawKeys(-1),150);
 }
+// ---- the Meta Quest system keyboard (needs Quest Browser 26.1 or newer) ----
+let kbInput=null,kbField='name';
+function openVRKeyboard(field){
+  const sess=renderer.xr.getSession&&renderer.xr.getSession();
+  if(!sess||sess.isSystemKeyboardSupported!==true){note('NEEDS QUEST BROWSER 26.1+');return;}
+  if(!kbInput){
+    kbInput=document.createElement('input');
+    kbInput.type='text';kbInput.autocomplete='off';kbInput.autocapitalize='off';kbInput.spellcheck=false;
+    kbInput.style.cssText='position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;border:0;padding:0;';
+    document.body.appendChild(kbInput);          // it has to live in the page for the keyboard to appear
+    kbInput.addEventListener('input',()=>{
+      if(kbField==='code')typedCode=kbInput.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);
+      else myName=kbInput.value.replace(/[^A-Za-z0-9_-]/g,'').slice(0,12);
+      saveName();drawScreen();
+    });
+    kbInput.addEventListener('keydown',e=>{if(e.key==='Enter')kbInput.blur();});
+  }
+  kbField=field;
+  kbInput.maxLength=field==='code'?4:12;
+  kbInput.value=field==='code'?typedCode:myName;
+  kbInput.focus();
+  note(field==='code'?'TYPE THE 4 CHAR ROOM CODE':'TYPE YOUR NAME');
+}
+function closeVRKeyboard(){if(kbInput)kbInput.blur();}
+function removeVRKeyboard(){if(kbInput){kbInput.remove();kbInput=null;}}
 function kbUpdate(dt){
   if(!VR()||curMap!=='forest'||!COMP.keys.length)return;
   for(const h of hands){
@@ -570,7 +596,7 @@ function kbUpdate(dt){
     h.kc=(h.kc||0)-dt;
     const w=h.world;let k=-1;
     if(Math.abs(w.z-COMP.pz)<0.1&&Math.abs(w.x-COMP.px)<COMP.pw/2&&Math.abs(w.y-COMP.py)<COMP.ph/2){
-      const u=(w.x-(COMP.px-COMP.pw/2))/COMP.pw*512,v=(COMP.py+COMP.ph/2-w.y)/COMP.ph*512;
+      const u=(w.x-(COMP.px-COMP.pw/2))/COMP.pw*512,v=(COMP.py+COMP.ph/2-w.y)/COMP.ph*COMP.kh;
       k=COMP.keys.findIndex(q=>u>=q.x&&u<=q.x+q.w&&v>=q.y&&v<=q.y+q.h);
     }
     if(k<0){h.kk=-1;continue;}
@@ -880,7 +906,7 @@ for(let i=0;i<2;i++){
   const mesh=new THREE.Mesh(new THREE.SphereGeometry(0.08,12,10),new THREE.MeshLambertMaterial({color:i?0x333333:0x555555}));
   body.add(mesh);body.add(c);
   const h={c,mesh,last:null,touch:false};
-  c.addEventListener('connected',e=>{h.gp=e.data.gamepad;h.side=e.data.handedness;if(h.side==='left')c.add(hud);});
+  c.addEventListener('connected',e=>{h.gp=e.data.gamepad;h.side=e.data.handedness;if(h.side==='left')c.add(hud);if(h.side==='right')c.add(lvhud);});
   hands.push(h);
 }
 
@@ -900,6 +926,30 @@ function drawHud(){
   x.font='15px sans-serif';x.fillStyle='#bff25a';
   if(MP.on)x.fillText(MP.msgT>0?MP.msg:'Room '+MP.code+' - '+(MP.n+1)+' players'+(MP.infected?' - INFECTED':MP.cured?' - CURED':''),14,124);
   htex.needsUpdate=true;
+}
+
+// level display on the right wrist
+const lc2=document.createElement('canvas');lc2.width=256;lc2.height=96;
+const lvtex=new THREE.CanvasTexture(lc2);
+const lvhud=new THREE.Mesh(new THREE.PlaneGeometry(0.16,0.06),new THREE.MeshBasicMaterial({map:lvtex,transparent:true}));
+lvhud.position.set(0,0.07,0.05);lvhud.rotation.x=-1.1;
+function drawLvHud(){
+  const x=lc2.getContext('2d');
+  x.fillStyle='rgba(10,25,5,.85)';x.fillRect(0,0,256,96);
+  x.fillStyle='#bff25a';x.textAlign='left';
+  if(!ACC.user){
+    x.font='bold 24px sans-serif';x.fillText('LEVEL --',14,34);
+    x.font='16px sans-serif';x.fillText('Log in to level up',14,80);
+  }else{
+    const L=levelFor(ACC.farts),a=xpFor(L),b=xpFor(L+1),f=Math.min(1,(ACC.farts-a)/(b-a));
+    x.font='bold 26px sans-serif';x.fillText('LEVEL '+L,14,32);
+    x.fillStyle='#333';x.fillRect(14,44,228,20);
+    x.fillStyle='#8bd22a';x.fillRect(14,44,228*f,20);
+    x.fillStyle='#bff25a';x.font='16px sans-serif';
+    if(ACC.saveErr){x.fillStyle='#ff9a9a';x.fillText('NOT SAVING - see menu',14,86);}
+    else x.fillText((ACC.farts-a)+' / '+(b-a)+' farts to level '+(L+1),14,86);
+  }
+  lvtex.needsUpdate=true;
 }
 
 // haptics
@@ -1128,7 +1178,7 @@ function toggleRoomMode(){
 }
 function joinTyped(){
   if(!MP.on){note('NOT IN A ROOM (OFFLINE)');return;}
-  if(typedCode.length!==4){note('USE EDIT: CODE, TYPE 4 CHARS');return;}
+  if(typedCode.length!==4){note('PRESS TYPE CODE, ENTER 4 CHARS');return;}
   if(typedCode===MP.code){note('ALREADY IN '+MP.code);return;}
   note('JOINING '+typedCode+'...');switchRoom(typedCode);
 }
@@ -1330,11 +1380,22 @@ function desktopUpdate(dt){
     }
   }
 }
-const hudEl=document.getElementById('hud'),crossEl=document.getElementById('cross');
+const hudEl=document.getElementById('hud'),crossEl=document.getElementById('cross'),lvpcEl=document.getElementById('lvpc');
 function domHud(){
   const on=!VR()&&ui.style.display==='none';
-  hudEl.style.display=crossEl.style.display=on?'block':'none';
+  hudEl.style.display=crossEl.style.display=lvpcEl.style.display=on?'block':'none';
   if(!on)return;
+  if(ACC.user){
+    const L=levelFor(ACC.farts),a=xpFor(L),b=xpFor(L+1);
+    document.getElementById('lvpct').textContent='Level '+L;
+    document.getElementById('lvpcf').style.width=Math.min(100,Math.round(100*(ACC.farts-a)/(b-a)))+'%';
+    document.getElementById('lvpcn').textContent=ACC.saveErr?('NOT SAVING: '+ACC.saveErr):((ACC.farts-a)+' / '+(b-a)+' farts to level '+(L+1));
+    lvpcEl.style.color=ACC.saveErr?'#ff9a9a':'#eaffc8';
+  }else{
+    document.getElementById('lvpct').textContent='Level --';
+    document.getElementById('lvpcf').style.width='0%';
+    document.getElementById('lvpcn').textContent='Log in to level up';
+  }
   const mp=typeof MP!=='undefined'&&MP.on;
   let t=(mode==='casual'?'Casual':'Infection')+'  |  '+({forest:'Forest',cave:'Caves',city:'City'})[curMap]+'\n';
   if(mode==='infection')t+=(mp&&MP.infected?'YOU ARE INFECTED':'Time '+time.toFixed(1)+'s   Best '+best.toFixed(1)+'s')+'\n';
@@ -1455,7 +1516,7 @@ renderer.setAnimationLoop(()=>{
     if(p.life<=0){scene.remove(p.m);p.m.material.dispose();puffs.splice(i,1);}
   }
 
-  mpUpdate(dt);hudT-=dt;if(hudT<=0){drawHud();domHud();hudT=0.2;}
+  mpUpdate(dt);hudT-=dt;if(hudT<=0){drawHud();drawLvHud();domHud();hudT=0.2;}
   renderer.render(scene,camera);
 });
 
@@ -1472,7 +1533,8 @@ async function start(m){
     const ok=!pc&&!!navigator.xr&&await navigator.xr.isSessionSupported('immersive-vr');
     if(ok){
       s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
-      s.addEventListener('end',()=>{ui.style.display='flex';mpLeave();flushXP();renderAccountUI();});
+      s.addEventListener('end',()=>{removeVRKeyboard();ui.style.display='flex';mpLeave();flushXP();renderAccountUI();});
+      s.addEventListener('visibilitychange',()=>{if(s.visibilityState==='visible')closeVRKeyboard();});
       await renderer.xr.setSession(s);
     }
     let use=m;
